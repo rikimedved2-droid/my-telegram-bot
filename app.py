@@ -171,7 +171,13 @@ def apply_replacements(schedule_list, replacements):
         if r['replacement'] == "Снято":
             repl_dict[pair_num] = None
         else:
-            new_line = f"{r['replacement']} ({r['teacher']}) - {r['room']}"
+            room = r['room']
+            teacher = r['teacher']
+            subject = r['replacement']
+            if room and room != "—":
+                new_line = f"{subject} ({teacher}) - <b>{room}</b>"
+            else:
+                new_line = f"{subject} ({teacher})"
             repl_dict[pair_num] = new_line
     result = []
     for line in schedule_list:
@@ -182,9 +188,11 @@ def apply_replacements(schedule_list, replacements):
                 if repl_dict[pair_num] is None:
                     continue
                 else:
-                    result.append(f"{pair_num} пара: {repl_dict[pair_num]} [ЗАМЕНА]")
+                    result.append(f"{pair_num} пара: {repl_dict[pair_num]} <i>[ЗАМЕНА]</i>")
             else:
-                result.append(line)
+                # Выделяем аудиторию жирным в обычной паре
+                new_line = re.sub(r' - (.*?)$', r' - <b>\1</b>', line)
+                result.append(new_line)
         else:
             result.append(line)
     return result
@@ -237,7 +245,7 @@ async def show_schedule(update: Update, days_ahead: int):
             message += f"\n(Замены на эту дату не опубликованы. Расписание обычное.)"
         elif not apply_flag and not file_date:
             message += f"\n(Не удалось проверить дату замен. Расписание обычное.)"
-        await update.message.reply_text(message)
+        await update.message.reply_text(message, parse_mode='HTML')
 
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {str(e)}")
@@ -252,7 +260,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"Привет! Я бот расписания и замен для группы {GROUP}.\n"
         "/t — расписание на сегодня с заменами (если уже выложены)\n"
-        "/r — расписание на завтра (замены применяются, только если дата в файле совпадает)"
+        "/r — расписание на завтра (замены применяются, только если дата в файле совпадает)",
+        parse_mode='HTML'
     )
 
 # ---------- Веб-хук и запуск ----------
@@ -290,6 +299,10 @@ async def main():
     async with application:
         await application.start()
         await server.serve()
+        await application.stop()
+
+if __name__ == "__main__":
+    asyncio.run(main())
         await application.stop()
 
 if __name__ == "__main__":
