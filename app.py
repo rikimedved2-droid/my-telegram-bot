@@ -145,7 +145,7 @@ def parse_zameny_from_text(text: str):
 def extract_metadata_from_file(text: str):
     date_match = re.search(r'(\d+)\s+([а-я]+)\s+(\d{4})\s+года', text)
     if not date_match:
-        return None, None, None
+        return None, None
     day = int(date_match.group(1))
     month_str = date_match.group(2)
     year = int(date_match.group(3))
@@ -214,14 +214,12 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Не удалось определить тип недели (числитель/знаменатель).")
             return
 
-        # День недели для этой даты
         weekdays_ru = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
         target_weekday = weekdays_ru[file_date.weekday()]
         if target_weekday == "воскресенье":
             await update.message.reply_text("В этот день пар нет.")
             return
 
-        # Выбираем базовое расписание
         if week_type == "Числитель":
             base_schedule = SCHEDULE_NUM.get(target_weekday, [])
         else:
@@ -231,20 +229,14 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"Расписание на {target_weekday} не найдено.")
             return
 
-        # Парсим замены (если есть)
         replacements = parse_zameny_from_text(file_text)
-        has_replacements = len(replacements) > 0
-
-        # Применяем замены
         final_schedule = apply_replacements(base_schedule, replacements)
 
-        # Формируем дату в читаемом виде
         date_str = file_date.strftime("%d.%m.%Y")
-        # Красивое сообщение
         message = f"📅 Расписание на {date_str} ({target_weekday}, {week_type}):\n\n"
         for line in final_schedule:
             message += f"• {line}\n"
-        if not has_replacements:
+        if not replacements:
             message += f"\n✅ Замен на {date_str} нет."
         await update.message.reply_text(message, parse_mode='HTML')
 
@@ -254,8 +246,9 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🤖 Бот расписания и замен для группы {GROUP}\n"
-        "Команда /z — показать итоговое расписание на дату, указанную в файле замен (обычно на сегодня или завтра).\n"
-        "Бот сам применяет замены и помечает их.",
+        "Команда /z — показать итоговое расписание на дату, указанную в файле замен.\n"
+        "Бот сам применяет замены и помечает их.\n"
+        "Команды /help, /ib, /start — эта справка.",
         parse_mode='HTML'
     )
 
@@ -266,7 +259,8 @@ async def main():
     application = Application.builder().token(TOKEN).updater(None).build()
     application.add_handler(CommandHandler("z", get_schedule))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("start", help_command))  # /start тоже показывает справку
+    application.add_handler(CommandHandler("ib", help_command))   # <-- добавлена команда /ib
+    application.add_handler(CommandHandler("start", help_command))
     await application.initialize()
     render_url = os.environ.get("RENDER_EXTERNAL_URL")
     if render_url:
