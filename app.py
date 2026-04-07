@@ -1,26 +1,93 @@
 import os
-import asyncio
-import logging
-import uvicorn
-from starlette.applications import Starlette
-from starlette.routing import Route
-from starlette.requests import Request
-from starlette.responses import PlainTextResponse, Response
+import requests
+import re
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
-import re
-import requests
+import uvicorn
+import asyncio
+from datetime import datetime, timedelta
 
-# --- НАСТРОЙКИ ---
-# Я уже вставил сюда твой токен!
+# === НАСТРОЙКИ ===
 TOKEN = "8612501783:AAGeBjR2_LP5DtfTPwzgg55nIjACKrH6hA0"
-# Адрес сайта с расписанием
 URL = "https://menu.sttec.yar.ru/timetable/rasp_first.html"
-# Название твоей группы
 GROUP = "ИБ1-21"
-# -----------------
+# =================
 
-# --- Функции для парсинга расписания (твой код, перенесенный сюда) ---
+# ----- Базовое расписание (числитель) -----
+SCHEDULE_NUM = {
+    "понедельник": [
+        "1 пара: Основы алгоритмизации и программирования (Вербицкая Н.А., Панасюк А.Д.) - Б302",
+        "2 пара: МДК.04.01 (Тимощук М.В., Егорова Ю.С. - Б309, П-квант., Б401)",
+        "3 пара: Русский язык и культура речи (Грибанова Е.Н.) - Б401",
+        "4 пара: Русский язык и культура речи (Грибанова Е.Н.) - Б401"
+    ],
+    "вторник": [
+        "0 пара: УП.04 Учебная практика (Хожайнова М.Г., Тимощук М.В.) - Б308",
+        "1 пара: УП.04 Учебная практика (Хожайнова М.Г., Тимощук М.В.) - Б308",
+        "2 пара: МДК.01.01 Операционные системы и среды (Егорова Ю.С., Андреева Е.И.) - Б407",
+        "3 пара: Дополнительная профессия п/гр.1 (Панасюк А.Д.) - Б304"
+    ],
+    "среда": [
+        "0 пара: МДК.01.02 Базы данных (Бадина Ю.А.) - Б302",
+        "1 пара: Технологии физического уровня передачи данных (Груздев В.В., Серова А.М.) - Б304, Б204",
+        "2 пара: Технологии физического уровня передачи данных (Груздев В.В.) - Б501"
+    ],
+    "четверг": [
+        "0 пара: МДК.04.01 (Тимощук М.В.) - ДОТ",
+        "1 пара: МДК.04 Учебная практика (Тимощук М.В.) - ДОТ",
+        "2 пара: Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - ДОТ"
+    ],
+    "пятница": [
+        "0 пара: Электроника и схемотехника п/гр.1 (Леонидова Н.А.) - Б509",
+        "1 пара: Электроника и схемотехника п/гр.1 (Леонидова Н.А.) - Б509",
+        "2 пара: Организационно-правовое обеспечение информационной безопасности (Воробьева Н.Е.) - Б502",
+        "3 пара: Математика (Холманова В.М.) - М102"
+    ],
+    "суббота": [
+        "1 пара: Дополнительная профессия п/гр.2 (Юров А.А.) - Б305",
+        "2 пара: Физическая культура (Куликова А.А.)",
+        "3 пара: Иностранный язык в профессиональной деятельности (Зубковская Е.А., Смирнова Е.Ф.) - А413, А412"
+    ]
+}
+
+# ----- Базовое расписание (знаменатель) -----
+SCHEDULE_DEN = {
+    "понедельник": [
+        "1 пара: Основы алгоритмизации и программирования (Вербицкая Н.А., Панасюк А.Д.) - Б302",
+        "2 пара: МДК.04.01 (Тимощук М.В., Егорова Ю.С. - Б309, П-квант., Б401)",
+        "3 пара: Электроника и схемотехника (Леонидова Н.А.) - М202"
+    ],
+    "вторник": [
+        "0 пара: МДК 04 Учебная практика (Хожайнова М.Г., Тимощук М.В.) - Б308/Б309",
+        "1 пара: УП.04.02 (Хожайнова М.Г., Тимощук М.В.) - Б308/Б309",
+        "2 пара: МДК.01.01 Операционные системы и среды (Егорова Ю.С., Андреева Е.И.) - Б407",
+        "3 пара: Дополнительная профессия п/гр 1 (Панасюк А.Д.) - Б304"
+    ],
+    "среда": [
+        "0 пара: МДК.01.02 Базы данных (Бадина Ю.А.) - Б302",
+        "1 пара: Технологии физического уровня передачи данных (Груздев В.В., Серова А.М.) - Б304, Б204",
+        "2 пара: Технологии физического уровня передачи данных (Груздев В.В.) - Б501"
+    ],
+    "четверг": [
+        "0 пара: МДК.04.02 (Тимощук М.В.) - ДОТ",
+        "1 пара: МДК.04 Учебная практика (Тимощук М.В.) - ДОТ",
+        "2 пара: Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - ДОТ",
+        "3 пара: Математика (Холманова В.М.) - ДОТ"
+    ],
+    "пятница": [
+        "0 пара: Электроника и схемотехника п/гр.2 (Леонидова Н.А.) - Б509",
+        "1 пара: Электроника и схемотехника п/гр.2 (Леонидова Н.А.) - Б509",
+        "2 пара: МДК 01.01 Операционные системы и среды (Егорова Ю.С.) - А401",
+        "3 пара: Организационно-правовое обеспечение информационной безопасности (Воробьева Н.Е.) - Б502"
+    ],
+    "суббота": [
+        "1 пара: Дополнительная профессия п/гр.2 (Юров А.А.) - Б305",
+        "2 пара: Физическая культура (Куликова А.А.)",
+        "3 пара: Иностранный язык в профессиональной деятельности (Зубковская Е.А., Смирнова Е.Ф.) - А413, А412"
+    ]
+}
+
+# ---------- Функции парсинга замен ----------
 def split_subject_and_teacher(text: str):
     text = text.strip()
     if not text or text == "Снято":
@@ -75,90 +142,151 @@ def parse_zameny_from_text(text: str):
         })
     return results
 
-def extract_date_from_file(text: str):
-    match = re.search(r'(\d+)\s+([а-я]+)\s+(\d{4})\s+года', text)
-    if match:
-        return f"{match.group(1)} {match.group(2)} {match.group(3)} года"
-    return None
-
-# --- Обработчик команды /zameny ---
-async def get_zameny(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Загружаю страницу с заменами...")
+def extract_metadata_from_file(text: str):
+    date_match = re.search(r'(\d+)\s+([а-я]+)\s+(\d{4})\s+года', text)
+    if not date_match:
+        return None, None, None
+    day = int(date_match.group(1))
+    month_str = date_match.group(2)
+    year = int(date_match.group(3))
+    months = {
+        "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
+        "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12
+    }
+    month = months.get(month_str.lower(), 1)
     try:
+        file_date = datetime(year, month, day)
+    except:
+        file_date = None
+    weekday_match = re.search(r'/\s*([а-я]+)', text)
+    weekday = weekday_match.group(1).lower() if weekday_match else None
+    type_match = re.search(r'\((Числитель|Знаменатель)\)', text)
+    week_type = type_match.group(1) if type_match else None
+    return file_date, weekday, week_type
+
+def apply_replacements(schedule_list, replacements):
+    repl_dict = {}
+    for r in replacements:
+        pair_num = r['pair']
+        if r['replacement'] == "Снято":
+            repl_dict[pair_num] = None
+        else:
+            new_line = f"{r['replacement']} ({r['teacher']}) - {r['room']}"
+            repl_dict[pair_num] = new_line
+    result = []
+    for line in schedule_list:
+        pair_match = re.match(r'(\d+)\s+пара:', line)
+        if pair_match:
+            pair_num = pair_match.group(1)
+            if pair_num in repl_dict:
+                if repl_dict[pair_num] is None:
+                    continue
+                else:
+                    result.append(f"{pair_num} пара: {repl_dict[pair_num]} [ЗАМЕНА]")
+            else:
+                result.append(line)
+        else:
+            result.append(line)
+    return result
+
+# ---------- Универсальная функция показа расписания ----------
+async def show_schedule(update: Update, days_ahead: int):
+    await update.message.reply_text("Загружаю данные...")
+    try:
+        target_date = datetime.now() + timedelta(days=days_ahead)
+        weekdays_ru = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+        target_weekday = weekdays_ru[target_date.weekday()]
+        if target_weekday == "воскресенье":
+            await update.message.reply_text("В воскресенье пар нет.")
+            return
+
         response = requests.get(URL, timeout=15)
         response.encoding = 'utf-8'
         if response.status_code != 200:
-            await update.message.reply_text(f"Ошибка: сайт вернул код {response.status_code}.")
+            await update.message.reply_text("Не удалось загрузить страницу с заменами.")
             return
-        file_content = response.text
-        replacements = parse_zameny_from_text(file_content)
-        date_str = extract_date_from_file(file_content)
-        if not date_str:
-            date_str = "указанную дату"
-        if replacements:
-            message = f"ЗАМЕНЫ НА {date_str}\n\n"
-            for r in replacements:
-                message += f"НОМЕР ПАРЫ: {r['pair']}\n"
-                message += f"ИСХОД ПАРА: {r['original']}\n"
-                message += f"ЗАМЕНА: {r['replacement']}\n"
-                message += f"ПРЕПОД: {r['teacher']}\n"
-                message += f"АУДИТОРИЯ: {r['room']}\n\n"
+
+        file_text = response.text
+        file_date, _, week_type = extract_metadata_from_file(file_text)
+
+        if week_type == "Числитель":
+            base_schedule = SCHEDULE_NUM.get(target_weekday, [])
+        elif week_type == "Знаменатель":
+            base_schedule = SCHEDULE_DEN.get(target_weekday, [])
         else:
-            message = f"✅ Замен для группы {GROUP} на {date_str} нет."
+            await update.message.reply_text("Не удалось определить тип недели (числитель/знаменатель).")
+            return
+
+        if not base_schedule:
+            await update.message.reply_text(f"Расписание на {target_weekday} не найдено.")
+            return
+
+        replacements = []
+        apply_flag = False
+        if file_date and file_date.date() == target_date.date():
+            replacements = parse_zameny_from_text(file_text)
+            apply_flag = True
+
+        final_schedule = apply_replacements(base_schedule, replacements) if apply_flag else base_schedule
+
+        day_str = "сегодня" if days_ahead == 0 else "завтра"
+        message = f"📅 Расписание на {day_str} ({target_weekday}, {week_type}):\n\n"
+        for line in final_schedule:
+            message += f"• {line}\n"
+        if not apply_flag and file_date:
+            message += f"\n(Замены на эту дату не опубликованы. Расписание обычное.)"
+        elif not apply_flag and not file_date:
+            message += f"\n(Не удалось проверить дату замен. Расписание обычное.)"
         await update.message.reply_text(message)
+
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {str(e)}")
-        
-# --- Обработчик команды /start ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"Привет! Я бот замен для группы {GROUP}.\nКоманда /zameny — показать замены.")
 
-# --- Часть для работы на Render через веб-хуки ---
+async def get_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_schedule(update, days_ahead=0)
+
+async def get_tomorrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_schedule(update, days_ahead=1)
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        f"Привет! Я бот расписания и замен для группы {GROUP}.\n"
+        "/t — расписание на сегодня с заменами (если уже выложены)\n"
+        "/r — расписание на завтра (замены применяются, только если дата в файле совпадает)"
+    )
+
+# ---------- Веб-хук и запуск ----------
 async def main():
-    # Настраиваем логирование
+    import logging
     logging.basicConfig(level=logging.INFO)
-    
-    # Создаем приложение бота
     application = Application.builder().token(TOKEN).updater(None).build()
-    
-    # Добавляем обработчики команд
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("zameny", get_zameny))
-    
-    # Инициализируем приложение
+    application.add_handler(CommandHandler("t", get_today))
+    application.add_handler(CommandHandler("r", get_tomorrow))
     await application.initialize()
-    
-    # Устанавливаем веб-хук. Render сам предоставит переменную окружения RENDER_EXTERNAL_URL
-    # Это и есть адрес, по которому будет "висеть" наш бот в интернете.
     render_url = os.environ.get("RENDER_EXTERNAL_URL")
     if render_url:
         await application.bot.set_webhook(f"{render_url}/telegram")
         logging.info(f"Webhook set to {render_url}/telegram")
     else:
-        logging.error("RENDER_EXTERNAL_URL not set. Webhook cannot be configured.")
+        logging.error("RENDER_EXTERNAL_URL not set.")
         return
-    
-    # Создаем Starlette приложение для обработки веб-хуков и проверки здоровья
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.requests import Request
+    from starlette.responses import Response, PlainTextResponse
     async def telegram_webhook(request: Request) -> Response:
-        # Это функция, которая принимает запрос от Telegram и передает его боту
         await application.update_queue.put(Update.de_json(await request.json(), application.bot))
         return Response()
-        
     async def health_check(request: Request) -> PlainTextResponse:
-        # Это эндпоинт, который Render будет проверять, чтобы убедиться, что наш бот жив
         return PlainTextResponse("OK")
-    
     starlette_app = Starlette(routes=[
         Route("/telegram", telegram_webhook, methods=["POST"]),
         Route("/healthcheck", health_check, methods=["GET"]),
     ])
-    
-    # Настраиваем и запускаем веб-сервер
     port = int(os.environ.get("PORT", 8000))
     config = uvicorn.Config(starlette_app, host="0.0.0.0", port=port, log_level="info")
     server = uvicorn.Server(config)
-    
-    # Запускаем бота и веб-сервер параллельно
     async with application:
         await application.start()
         await server.serve()
