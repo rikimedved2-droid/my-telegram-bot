@@ -16,8 +16,8 @@ GROUP = "ИБ1-21"
 # ----- Базовое расписание (числитель) -----
 SCHEDULE_NUM = {
     "понедельник": [
-        "1 пара: Основы алгоритмизации и программирования (Вербицкая Н.А., Панасюк А.Д.) - Б302",
-        "2 пара: МДК.04.01 (Тимощук М.В., Егорова Ю.С. - Б309, П-квант., Б401)",
+        "1 пара: Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - Б302",
+        "2 пара: МДК.04.01 (Тимощук М.В., Егорова Ю.С.) - Б309",
         "3 пара: Русский язык и культура речи (Грибанова Е.Н.) - Б401",
         "4 пара: Русский язык и культура речи (Грибанова Е.Н.) - Б401"
     ],
@@ -45,7 +45,7 @@ SCHEDULE_NUM = {
     ],
     "суббота": [
         "1 пара: Дополнительная профессия п/гр.2 (Юров А.А.) - Б305",
-        "2 пара: Физическая культура (Куликова А.А.)",
+        "2 пара: Физическая культура (Куликова А.А.) - Спорт Зал",
         "3 пара: Иностранный язык в профессиональной деятельности (Зубковская Е.А., Смирнова Е.Ф.) - А413, А412"
     ]
 }
@@ -53,8 +53,8 @@ SCHEDULE_NUM = {
 # ----- Базовое расписание (знаменатель) -----
 SCHEDULE_DEN = {
     "понедельник": [
-        "1 пара: Основы алгоритмизации и программирования (Вербицкая Н.А., Панасюк А.Д.) - Б302",
-        "2 пара: МДК.04.01 (Тимощук М.В., Егорова Ю.С. - Б309, П-квант., Б401)",
+        "1 пара: Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - Б302",
+        "2 пара: МДК.04.01 (Тимощук М.В., Егорова Ю.С.) - Б309",
         "3 пара: Электроника и схемотехника (Леонидова Н.А.) - М202"
     ],
     "вторник": [
@@ -64,7 +64,7 @@ SCHEDULE_DEN = {
         "3 пара: Дополнительная профессия п/гр 1 (Панасюк А.Д.) - Б304"
     ],
     "среда": [
-        "0 пара: МДК.01.02 Базы данных (Бадина Ю.А.) - Б302",
+        "0 пара: МДК.01.02 Базы данных (Байдина Ю.А.) - Б302",
         "1 пара: Технологии физического уровня передачи данных (Груздев В.В., Серова А.М.) - Б304, Б204",
         "2 пара: Технологии физического уровня передачи данных (Груздев В.В.) - Б501"
     ],
@@ -82,7 +82,7 @@ SCHEDULE_DEN = {
     ],
     "суббота": [
         "1 пара: Дополнительная профессия п/гр.2 (Юров А.А.) - Б305",
-        "2 пара: Физическая культура (Куликова А.А.)",
+        "2 пара: Физическая культура (Куликова А.А.) - спорт зал",
         "3 пара: Иностранный язык в профессиональной деятельности (Зубковская Е.А., Смирнова Е.Ф.) - А413, А412"
     ]
 }
@@ -158,11 +158,9 @@ def extract_metadata_from_file(text: str):
         file_date = datetime(year, month, day)
     except:
         file_date = None
-    weekday_match = re.search(r'/\s*([а-я]+)', text)
-    weekday = weekday_match.group(1).lower() if weekday_match else None
     type_match = re.search(r'\((Числитель|Знаменатель)\)', text)
     week_type = type_match.group(1) if type_match else None
-    return file_date, weekday, week_type
+    return file_date, week_type
 
 def apply_replacements(schedule_list, replacements):
     repl_dict = {}
@@ -190,24 +188,16 @@ def apply_replacements(schedule_list, replacements):
                 else:
                     result.append(f"{pair_num} пара: {repl_dict[pair_num]} <i>[ЗАМЕНА]</i>")
             else:
-                # Выделяем аудиторию жирным в обычной паре
                 new_line = re.sub(r' - (.*?)$', r' - <b>\1</b>', line)
                 result.append(new_line)
         else:
             result.append(line)
     return result
 
-# ---------- Универсальная функция показа расписания ----------
-async def show_schedule(update: Update, days_ahead: int):
-    await update.message.reply_text("Загружаю данные...")
+# ---------- Основная команда /z ----------
+async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Загружаю расписание...")
     try:
-        target_date = datetime.now() + timedelta(days=days_ahead)
-        weekdays_ru = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
-        target_weekday = weekdays_ru[target_date.weekday()]
-        if target_weekday == "воскресенье":
-            await update.message.reply_text("В воскресенье пар нет.")
-            return
-
         response = requests.get(URL, timeout=15)
         response.encoding = 'utf-8'
         if response.status_code != 200:
@@ -215,52 +205,57 @@ async def show_schedule(update: Update, days_ahead: int):
             return
 
         file_text = response.text
-        file_date, _, week_type = extract_metadata_from_file(file_text)
+        file_date, week_type = extract_metadata_from_file(file_text)
 
-        if week_type == "Числитель":
-            base_schedule = SCHEDULE_NUM.get(target_weekday, [])
-        elif week_type == "Знаменатель":
-            base_schedule = SCHEDULE_DEN.get(target_weekday, [])
-        else:
+        if not file_date:
+            await update.message.reply_text("Не удалось определить дату в файле замен.")
+            return
+        if not week_type:
             await update.message.reply_text("Не удалось определить тип недели (числитель/знаменатель).")
             return
+
+        # День недели для этой даты
+        weekdays_ru = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+        target_weekday = weekdays_ru[file_date.weekday()]
+        if target_weekday == "воскресенье":
+            await update.message.reply_text("В этот день пар нет.")
+            return
+
+        # Выбираем базовое расписание
+        if week_type == "Числитель":
+            base_schedule = SCHEDULE_NUM.get(target_weekday, [])
+        else:
+            base_schedule = SCHEDULE_DEN.get(target_weekday, [])
 
         if not base_schedule:
             await update.message.reply_text(f"Расписание на {target_weekday} не найдено.")
             return
 
-        replacements = []
-        apply_flag = False
-        if file_date and file_date.date() == target_date.date():
-            replacements = parse_zameny_from_text(file_text)
-            apply_flag = True
+        # Парсим замены (если есть)
+        replacements = parse_zameny_from_text(file_text)
+        has_replacements = len(replacements) > 0
 
-        final_schedule = apply_replacements(base_schedule, replacements) if apply_flag else base_schedule
+        # Применяем замены
+        final_schedule = apply_replacements(base_schedule, replacements)
 
-        day_str = "сегодня" if days_ahead == 0 else "завтра"
-        message = f"📅 Расписание на {day_str} ({target_weekday}, {week_type}):\n\n"
+        # Формируем дату в читаемом виде
+        date_str = file_date.strftime("%d.%m.%Y")
+        # Красивое сообщение
+        message = f"📅 Расписание на {date_str} ({target_weekday}, {week_type}):\n\n"
         for line in final_schedule:
             message += f"• {line}\n"
-        if not apply_flag and file_date:
-            message += f"\n(Замены на эту дату не опубликованы. Расписание обычное.)"
-        elif not apply_flag and not file_date:
-            message += f"\n(Не удалось проверить дату замен. Расписание обычное.)"
+        if not has_replacements:
+            message += f"\n✅ Замен на {date_str} нет."
         await update.message.reply_text(message, parse_mode='HTML')
 
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {str(e)}")
 
-async def get_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await show_schedule(update, days_ahead=0)
-
-async def get_tomorrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await show_schedule(update, days_ahead=1)
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        f"Привет! Я бот расписания и замен для группы {GROUP}.\n"
-        "/t — расписание на сегодня с заменами (если уже выложены)\n"
-        "/r — расписание на завтра (замены применяются, только если дата в файле совпадает)",
+        f"🤖 Бот расписания и замен для группы {GROUP}\n"
+        "Команда /z — показать итоговое расписание на дату, указанную в файле замен (обычно на сегодня или завтра).\n"
+        "Бот сам применяет замены и помечает их.",
         parse_mode='HTML'
     )
 
@@ -269,9 +264,9 @@ async def main():
     import logging
     logging.basicConfig(level=logging.INFO)
     application = Application.builder().token(TOKEN).updater(None).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("t", get_today))
-    application.add_handler(CommandHandler("r", get_tomorrow))
+    application.add_handler(CommandHandler("z", get_schedule))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("start", help_command))  # /start тоже показывает справку
     await application.initialize()
     render_url = os.environ.get("RENDER_EXTERNAL_URL")
     if render_url:
@@ -299,10 +294,6 @@ async def main():
     async with application:
         await application.start()
         await server.serve()
-        await application.stop()
-
-if __name__ == "__main__":
-    asyncio.run(main())
         await application.stop()
 
 if __name__ == "__main__":
