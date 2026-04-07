@@ -243,12 +243,11 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {str(e)}")
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def ib_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🤖 Бот расписания и замен для группы {GROUP}\n"
         "Команда /z — показать итоговое расписание на дату, указанную в файле замен.\n"
-        "Бот сам применяет замены и помечает их.\n"
-        "Команды /help, /ib, /start — эта справка.",
+        "Бот сам применяет замены и помечает их.",
         parse_mode='HTML'
     )
 
@@ -258,9 +257,8 @@ async def main():
     logging.basicConfig(level=logging.INFO)
     application = Application.builder().token(TOKEN).updater(None).build()
     application.add_handler(CommandHandler("z", get_schedule))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("ib", help_command))   # <-- добавлена команда /ib
-    application.add_handler(CommandHandler("start", help_command))
+    application.add_handler(CommandHandler("ib", ib_command))
+    # /start не обрабатываем – бот просто проигнорирует
     await application.initialize()
     render_url = os.environ.get("RENDER_EXTERNAL_URL")
     if render_url:
