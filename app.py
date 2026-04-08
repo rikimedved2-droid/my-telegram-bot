@@ -6,6 +6,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 import uvicorn
 import asyncio
 from datetime import datetime, timedelta
+from bs4 import BeautifulSoup
 
 TOKEN = "8612501783:AAGeBjR2_LP5DtfTPwzgg55nIjACKrH6hA0"
 URL = "https://menu.sttec.yar.ru/timetable/rasp_first.html"
@@ -87,6 +88,10 @@ SCHEDULE_DEN = {
 
 # ---------- Вспомогательные функции ----------
 def expand_pair_numbers(pair_str: str):
+    """Преобразует '0,1' или '0-3' в список ['0','1'] или ['0','1','2','3']"""
+    if not pair_str:
+        return []
+    pair_str = str(pair_str).strip()
     if ',' in pair_str:
         parts = pair_str.split(',')
         result = []
@@ -101,7 +106,7 @@ def expand_pair_numbers(pair_str: str):
         start, end = map(int, pair_str.split('-'))
         return [str(i) for i in range(start, end+1)]
     else:
-        return [pair_str.strip()]
+        return [pair_str]
 
 def split_subject_and_teacher(text: str):
     text = text.strip()
@@ -115,39 +120,52 @@ def split_subject_and_teacher(text: str):
     else:
         return text, "—"
 
-def parse_zameny_from_text(text: str):
-    lines = text.splitlines()
+def parse_zameny_from_html(html_text: str):
+    """Парсит HTML-таблицу и возвращает список замен для группы GROUP"""
+    soup = BeautifulSoup(html_text, 'html.parser')
+    table = soup.find('table')
+    if not table:
+        return []
+    
     results = []
-    for line in lines:
-        if GROUP not in line:
+    rows = table.find_all('tr')
+    
+    for row in rows:
+        cells = row.find_all('td')
+        if len(cells) < 6:
             continue
-        group_idx = line.find(GROUP)
-        after_group = line[group_idx + len(GROUP):].lstrip()
-        pair_match = re.match(r'([\d,\-]+)', after_group)
-        if not pair_match:
+        
+        group_cell = cells[1].get_text(strip=True)
+        if GROUP not in group_cell:
             continue
-        pair_numbers_str = pair_match.group(1)
-        rest = after_group[len(pair_numbers_str):].lstrip()
-        parts = re.split(r'\s{2,}', rest)
-        if len(parts) < 2:
+        
+        pair_numbers_str = cells[2].get_text(strip=True)
+        original = cells[3].get_text(strip=True)
+        replacement_full = cells[4].get_text(strip=True)
+        room = cells[5].get_text(strip=True)
+        
+        if not replacement_full or replacement_full == "—" or replacement_full == "-":
             continue
-        original = parts[0].strip()
-        replacement_full = parts[1].strip()
-        room = parts[2].strip() if len(parts) > 2 else "—"
+        
         pair_list = expand_pair_numbers(pair_numbers_str)
+        
         for pair_num in pair_list:
             replacement_subj, replacement_teacher = split_subject_and_teacher(replacement_full)
             results.append({
                 "pair": pair_num,
-                "original": original,
+                "original": original if original else "—",
                 "replacement": replacement_subj,
                 "teacher": replacement_teacher,
-                "room": room
+                "room": room if room else "—"
             })
+    
     return results
 
-def extract_metadata_from_file(text: str):
-    date_match = re.search(r'(\d+)\s+([а-я]+)\s+(\d{4})\s+года', text)
+def extract_metadata_from_html(html_text: str):
+    """Извлекает дату и тип недели из HTML"""
+    soup = BeautifulSoup(html_text, 'html.parser')
+    body_text = soup.get_text()
+    date_match = re.search(r'(\d+)\s+([а-я]+)\s+(\d{4})\s+года', body_text)
     if not date_match:
         return None, None
     day = int(date_match.group(1))
@@ -162,7 +180,7 @@ def extract_metadata_from_file(text: str):
         file_date = datetime(year, month, day)
     except:
         file_date = None
-    type_match = re.search(r'\((Числитель|Знаменатель)\)', text)
+    type_match = re.search(r'\((Числитель|Знаменатель)\)', body_text)
     week_type = type_match.group(1) if type_match else None
     return file_date, week_type
 
@@ -198,6 +216,7 @@ def apply_replacements(schedule_list, replacements):
             result.append(line)
     return result
 
+# ---------- Основная команда /zam ----------
 async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Загружаю расписание...")
     try:
@@ -206,28 +225,35 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if response.status_code != 200:
             await update.message.reply_text("Не удалось загрузить страницу с заменами.")
             return
-        file_text = response.text
-        file_date, week_type = extract_metadata_from_file(file_text)
+
+        html_text = response.text
+        file_date, week_type = extract_metadata_from_html(html_text)
+
         if not file_date:
             await update.message.reply_text("Не удалось определить дату в файле замен.")
             return
         if not week_type:
             await update.message.reply_text("Не удалось определить тип недели (числитель/знаменатель).")
             return
+
         weekdays_ru = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
         target_weekday = weekdays_ru[file_date.weekday()]
         if target_weekday == "воскресенье":
             await update.message.reply_text("В этот день пар нет.")
             return
+
         if week_type == "Числитель":
             base_schedule = SCHEDULE_NUM.get(target_weekday, [])
         else:
             base_schedule = SCHEDULE_DEN.get(target_weekday, [])
+
         if not base_schedule:
             await update.message.reply_text(f"Расписание на {target_weekday} не найдено.")
             return
-        replacements = parse_zameny_from_text(file_text)
+
+        replacements = parse_zameny_from_html(html_text)
         final_schedule = apply_replacements(base_schedule, replacements)
+
         date_str = file_date.strftime("%d.%m.%Y")
         message = f"📅 Расписание на {date_str} ({target_weekday}, {week_type}):\n\n"
         for line in final_schedule:
@@ -235,6 +261,7 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not replacements:
             message += f"\n✅ Замен на {date_str} нет."
         await update.message.reply_text(message, parse_mode='HTML')
+
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {str(e)}")
 
@@ -246,6 +273,7 @@ async def ib_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML'
     )
 
+# ---------- Веб-хук и запуск ----------
 async def main():
     import logging
     logging.basicConfig(level=logging.INFO)
