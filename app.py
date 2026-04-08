@@ -7,13 +7,11 @@ import uvicorn
 import asyncio
 from datetime import datetime, timedelta
 
-# === НАСТРОЙКИ ===
 TOKEN = "8612501783:AAGeBjR2_LP5DtfTPwzgg55nIjACKrH6hA0"
 URL = "https://menu.sttec.yar.ru/timetable/rasp_first.html"
 GROUP = "ИБ1-21"
-# =================
 
-# ----- Базовое расписание (числитель) -----
+# ---------- Базовое расписание (числитель) ----------
 SCHEDULE_NUM = {
     "понедельник": [
         "1 пара: Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - Б302",
@@ -50,7 +48,7 @@ SCHEDULE_NUM = {
     ]
 }
 
-# ----- Базовое расписание (знаменатель) -----
+# ---------- Базовое расписание (знаменатель) ----------
 SCHEDULE_DEN = {
     "понедельник": [
         "1 пара: Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - Б302",
@@ -87,9 +85,8 @@ SCHEDULE_DEN = {
     ]
 }
 
-# ---------- Функции парсинга замен (исправленная) ----------
+# ---------- Вспомогательные функции ----------
 def expand_pair_numbers(pair_str: str):
-    """Преобразует строку с номерами пар вида '0,1', '0-3', '0,1,2' в список отдельных номеров"""
     if ',' in pair_str:
         parts = pair_str.split(',')
         result = []
@@ -106,12 +103,17 @@ def expand_pair_numbers(pair_str: str):
     else:
         return [pair_str.strip()]
 
-def split_original_disciplines(orig_str: str, num_pairs: int):
-    """Если в исходной дисциплине перечислено несколько предметов (через пробел или запятую), разделить на список"""
-    # Упрощённо: если num_pairs > 1, пытаемся разбить по пробелам? Но в примере "МДК 04.01 УП 04" - это два предмета.
-    # Пока вернём один и тот же для всех пар (как временное решение)
-    # Для более точного разбора нужно знать структуру. Сейчас просто вернём один предмет для всех пар.
-    return [orig_str] * num_pairs
+def split_subject_and_teacher(text: str):
+    text = text.strip()
+    if not text or text == "Снято":
+        return text, "—"
+    match = re.search(r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.(?:[А-ЯЁ]\.)?)$', text)
+    if match:
+        teacher = match.group(1)
+        subject = text[:match.start()].strip()
+        return subject, teacher
+    else:
+        return text, "—"
 
 def parse_zameny_from_text(text: str):
     lines = text.splitlines()
@@ -119,32 +121,21 @@ def parse_zameny_from_text(text: str):
     for line in lines:
         if GROUP not in line:
             continue
-        # Ищем группу
         group_idx = line.find(GROUP)
         after_group = line[group_idx + len(GROUP):].lstrip()
-        # Извлекаем номер пары (может быть "0,1" или "0-3")
         pair_match = re.match(r'([\d,\-]+)', after_group)
         if not pair_match:
             continue
         pair_numbers_str = pair_match.group(1)
         rest = after_group[len(pair_numbers_str):].lstrip()
-        # Разделяем по двум и более пробелам
         parts = re.split(r'\s{2,}', rest)
         if len(parts) < 2:
             continue
-        # Первая часть - исходная дисциплина (может быть несколько)
-        original_part = parts[0].strip()
-        # Вторая часть - дисциплина по замене
-        replacement_full = parts[1].strip() if len(parts) > 1 else ""
-        # Аудитория - третья часть, если есть
+        original = parts[0].strip()
+        replacement_full = parts[1].strip()
         room = parts[2].strip() if len(parts) > 2 else "—"
-        # Разворачиваем номера пар
         pair_list = expand_pair_numbers(pair_numbers_str)
-        # Для каждого номера пары создаём запись о замене
         for pair_num in pair_list:
-            # Если исходная дисциплина пустая - ставим "—"
-            original = original_part if original_part else "—"
-            # Разделяем замену на предмет и преподавателя
             replacement_subj, replacement_teacher = split_subject_and_teacher(replacement_full)
             results.append({
                 "pair": pair_num,
@@ -154,19 +145,6 @@ def parse_zameny_from_text(text: str):
                 "room": room
             })
     return results
-
-def split_subject_and_teacher(text: str):
-    text = text.strip()
-    if not text or text == "Снято":
-        return text, "—"
-    # Ищем в конце фамилию с инициалами
-    match = re.search(r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.(?:[А-ЯЁ]\.)?)$', text)
-    if match:
-        teacher = match.group(1)
-        subject = text[:match.start()].strip()
-        return subject, teacher
-    else:
-        return text, "—"
 
 def extract_metadata_from_file(text: str):
     date_match = re.search(r'(\d+)\s+([а-я]+)\s+(\d{4})\s+года', text)
@@ -220,7 +198,6 @@ def apply_replacements(schedule_list, replacements):
             result.append(line)
     return result
 
-# ---------- Основная команда /zam ----------
 async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Загружаю расписание...")
     try:
@@ -229,35 +206,28 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if response.status_code != 200:
             await update.message.reply_text("Не удалось загрузить страницу с заменами.")
             return
-
         file_text = response.text
         file_date, week_type = extract_metadata_from_file(file_text)
-
         if not file_date:
             await update.message.reply_text("Не удалось определить дату в файле замен.")
             return
         if not week_type:
             await update.message.reply_text("Не удалось определить тип недели (числитель/знаменатель).")
             return
-
         weekdays_ru = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
         target_weekday = weekdays_ru[file_date.weekday()]
         if target_weekday == "воскресенье":
             await update.message.reply_text("В этот день пар нет.")
             return
-
         if week_type == "Числитель":
             base_schedule = SCHEDULE_NUM.get(target_weekday, [])
         else:
             base_schedule = SCHEDULE_DEN.get(target_weekday, [])
-
         if not base_schedule:
             await update.message.reply_text(f"Расписание на {target_weekday} не найдено.")
             return
-
         replacements = parse_zameny_from_text(file_text)
         final_schedule = apply_replacements(base_schedule, replacements)
-
         date_str = file_date.strftime("%d.%m.%Y")
         message = f"📅 Расписание на {date_str} ({target_weekday}, {week_type}):\n\n"
         for line in final_schedule:
@@ -265,7 +235,6 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not replacements:
             message += f"\n✅ Замен на {date_str} нет."
         await update.message.reply_text(message, parse_mode='HTML')
-
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {str(e)}")
 
@@ -277,7 +246,6 @@ async def ib_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML'
     )
 
-# ---------- Веб-хук и запуск ----------
 async def main():
     import logging
     logging.basicConfig(level=logging.INFO)
