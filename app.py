@@ -88,7 +88,6 @@ SCHEDULE_DEN = {
 
 # ---------- Вспомогательные функции ----------
 def expand_pair_numbers(pair_str: str):
-    """Преобразует '0,1' или '0-3' в список ['0','1'] или ['0','1','2','3']"""
     if not pair_str:
         return []
     pair_str = str(pair_str).strip()
@@ -121,34 +120,26 @@ def split_subject_and_teacher(text: str):
         return text, "—"
 
 def parse_zameny_from_html(html_text: str):
-    """Парсит HTML-таблицу и возвращает список замен для группы GROUP"""
     soup = BeautifulSoup(html_text, 'html.parser')
     table = soup.find('table')
     if not table:
         return []
-    
     results = []
     rows = table.find_all('tr')
-    
     for row in rows:
         cells = row.find_all('td')
         if len(cells) < 6:
             continue
-        
         group_cell = cells[1].get_text(strip=True)
         if GROUP not in group_cell:
             continue
-        
         pair_numbers_str = cells[2].get_text(strip=True)
         original = cells[3].get_text(strip=True)
         replacement_full = cells[4].get_text(strip=True)
         room = cells[5].get_text(strip=True)
-        
-        if not replacement_full or replacement_full == "—" or replacement_full == "-":
+        if not replacement_full or replacement_full in ("—", "-"):
             continue
-        
         pair_list = expand_pair_numbers(pair_numbers_str)
-        
         for pair_num in pair_list:
             replacement_subj, replacement_teacher = split_subject_and_teacher(replacement_full)
             results.append({
@@ -158,11 +149,9 @@ def parse_zameny_from_html(html_text: str):
                 "teacher": replacement_teacher,
                 "room": room if room else "—"
             })
-    
     return results
 
 def extract_metadata_from_html(html_text: str):
-    """Извлекает дату и тип недели из HTML"""
     soup = BeautifulSoup(html_text, 'html.parser')
     body_text = soup.get_text()
     date_match = re.search(r'(\d+)\s+([а-я]+)\s+(\d{4})\s+года', body_text)
@@ -216,7 +205,7 @@ def apply_replacements(schedule_list, replacements):
             result.append(line)
     return result
 
-# ---------- Основная команда /zam ----------
+# ---------- Команда /zam (итоговое расписание) ----------
 async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Загружаю расписание...")
     try:
@@ -225,35 +214,28 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if response.status_code != 200:
             await update.message.reply_text("Не удалось загрузить страницу с заменами.")
             return
-
         html_text = response.text
         file_date, week_type = extract_metadata_from_html(html_text)
-
         if not file_date:
             await update.message.reply_text("Не удалось определить дату в файле замен.")
             return
         if not week_type:
-            await update.message.reply_text("Не удалось определить тип недели (числитель/знаменатель).")
+            await update.message.reply_text("Не удалось определить тип недели.")
             return
-
         weekdays_ru = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
         target_weekday = weekdays_ru[file_date.weekday()]
         if target_weekday == "воскресенье":
             await update.message.reply_text("В этот день пар нет.")
             return
-
         if week_type == "Числитель":
             base_schedule = SCHEDULE_NUM.get(target_weekday, [])
         else:
             base_schedule = SCHEDULE_DEN.get(target_weekday, [])
-
         if not base_schedule:
             await update.message.reply_text(f"Расписание на {target_weekday} не найдено.")
             return
-
         replacements = parse_zameny_from_html(html_text)
         final_schedule = apply_replacements(base_schedule, replacements)
-
         date_str = file_date.strftime("%d.%m.%Y")
         message = f"📅 Расписание на {date_str} ({target_weekday}, {week_type}):\n\n"
         for line in final_schedule:
@@ -261,24 +243,45 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not replacements:
             message += f"\n✅ Замен на {date_str} нет."
         await update.message.reply_text(message, parse_mode='HTML')
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка: {str(e)}")
 
+# ---------- Команда /zamena (показать сырые данные о заменах) ----------
+async def show_raw_replacements(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Проверяю замены для ИБ1-21...")
+    try:
+        response = requests.get(URL, timeout=15)
+        response.encoding = 'utf-8'
+        if response.status_code != 200:
+            await update.message.reply_text("Не удалось загрузить страницу.")
+            return
+        html_text = response.text
+        replacements = parse_zameny_from_html(html_text)
+        if not replacements:
+            await update.message.reply_text("Замены для группы ИБ1-21 не найдены.")
+            return
+        message = "🔍 Найденные замены (сырые данные):\n\n"
+        for r in replacements:
+            message += f"Пара {r['pair']}: {r['original']} → {r['replacement']} (преп. {r['teacher']}, ауд. {r['room']})\n"
+        await update.message.reply_text(message)
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {str(e)}")
 
 async def ib_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🤖 Бот расписания и замен для группы {GROUP}\n"
-        "Команда /zam — показать итоговое расписание на дату, указанную в файле замен.\n"
-        "Бот сам применяет замены и помечает их.",
+        "Команда /zam — итоговое расписание с заменами\n"
+        "Команда /zamena — показать, какие замены найдены (для отладки)",
         parse_mode='HTML'
     )
 
-# ---------- Веб-хук и запуск ----------
+# ---------- Запуск ----------
 async def main():
     import logging
     logging.basicConfig(level=logging.INFO)
     application = Application.builder().token(TOKEN).updater(None).build()
     application.add_handler(CommandHandler("zam", get_schedule))
+    application.add_handler(CommandHandler("zamena", show_raw_replacements))
     application.add_handler(CommandHandler("ib", ib_command))
     await application.initialize()
     render_url = os.environ.get("RENDER_EXTERNAL_URL")
