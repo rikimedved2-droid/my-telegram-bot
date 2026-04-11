@@ -6,91 +6,86 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 import uvicorn
 import asyncio
 from datetime import datetime, timedelta
-from bs4 import BeautifulSoup
 
 TOKEN = "8612501783:AAGeBjR2_LP5DtfTPwzgg55nIjACKrH6hA0"
 URL = "https://menu.sttec.yar.ru/timetable/rasp_first.html"
 GROUP = "ИБ1-21"
 
 # ---------- Базовое расписание (числитель) ----------
-SCHEDULE_NUM = {
-    "понедельник": [
-        "1 пара: Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - Б302",
-        "2 пара: МДК.04.01 (Тимощук М.В., Егорова Ю.С.) - Б309",
-        "3 пара: Русский язык и культура речи (Грибанова Е.Н.) - Б401",
-        "4 пара: Русский язык и культура речи (Грибанова Е.Н.) - Б401"
-    ],
-    "вторник": [
-        "0 пара: УП.04 Учебная практика (Хожайнова М.Г., Тимощук М.В.) - Б308",
-        "1 пара: УП.04 Учебная практика (Хожайнова М.Г., Тимощук М.В.) - Б308",
-        "2 пара: МДК.01.01 Операционные системы и среды (Егорова Ю.С., Андреева Е.И.) - Б407",
-        "3 пара: Дополнительная профессия п/гр.1 (Панасюк А.Д.) - Б304"
-    ],
-    "среда": [
-        "0 пара: МДК.01.02 Базы данных (Бадина Ю.А.) - Б302",
-        "1 пара: Технологии физического уровня передачи данных (Груздев В.В., Серова А.М.) - Б304, Б204",
-        "2 пара: Технологии физического уровня передачи данных (Груздев В.В.) - Б501"
-    ],
-    "четверг": [
-        "0 пара: МДК.04.01 (Тимощук М.В.) - ДОТ",
-        "1 пара: МДК.04 Учебная практика (Тимощук М.В.) - ДОТ",
-        "2 пара: Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - ДОТ"
-    ],
-    "пятница": [
-        "0 пара: Электроника и схемотехника п/гр.1 (Леонидова Н.А.) - Б509",
-        "1 пара: Электроника и схемотехника п/гр.1 (Леонидова Н.А.) - Б509",
-        "2 пара: Организационно-правовое обеспечение информационной безопасности (Воробьева Н.Е.) - Б502",
-        "3 пара: Математика (Холманова В.М.) - М102"
-    ],
-    "суббота": [
-        "1 пара: Дополнительная профессия п/гр.2 (Юров А.А.) - Б305",
-        "2 пара: Физическая культура (Куликова А.А.) - Спорт Зал",
-        "3 пара: Иностранный язык в профессиональной деятельности (Зубковская Е.А., Смирнова Е.Ф.) - А413, А412"
-    ]
+SCHEDULE_NUM_FULL = {
+    "понедельник": {
+        "1": "Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - Б302",
+        "2": "МДК.04.01 (Тимощук М.В., Егорова Ю.С.) - Б309",
+        "3": "Русский язык и культура речи (Грибанова Е.Н.) - Б401",
+        "4": "Русский язык и культура речи (Грибанова Е.Н.) - Б401",
+    },
+    "вторник": {
+        "0": "УП.04 Учебная практика (Хожайнова М.Г., Тимощук М.В.) - Б308",
+        "1": "УП.04 Учебная практика (Хожайнова М.Г., Тимощук М.В.) - Б308",
+        "2": "МДК.01.01 Операционные системы и среды (Егорова Ю.С., Андреева Е.И.) - Б407",
+        "3": "Дополнительная профессия п/гр.1 (Панасюк А.Д.) - Б304",
+    },
+    "среда": {
+        "0": "МДК.01.02 Базы данных (Бадина Ю.А.) - Б302",
+        "1": "Технологии физического уровня передачи данных (Груздев В.В., Серова А.М.) - Б304, Б204",
+        "2": "Технологии физического уровня передачи данных (Груздев В.В.) - Б501",
+    },
+    "четверг": {
+        "0": "МДК.04.01 (Тимощук М.В.) - ДОТ",
+        "1": "МДК.04 Учебная практика (Тимощук М.В.) - ДОТ",
+        "2": "Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - ДОТ",
+    },
+    "пятница": {
+        "0": "Электроника и схемотехника п/гр.1 (Леонидова Н.А.) - Б509",
+        "1": "Электроника и схемотехника п/гр.1 (Леонидова Н.А.) - Б509",
+        "2": "Организационно-правовое обеспечение информационной безопасности (Воробьева Н.Е.) - Б502",
+        "3": "Математика (Холманова В.М.) - М102",
+    },
+    "суббота": {
+        "1": "Дополнительная профессия п/гр.2 (Юров А.А.) - Б305",
+        "2": "Физическая культура (Куликова А.А.) - Спорт Зал",
+        "3": "Иностранный язык в профессиональной деятельности (Зубковская Е.А., Смирнова Е.Ф.) - А413, А412",
+    },
 }
 
-# ---------- Базовое расписание (знаменатель) ----------
-SCHEDULE_DEN = {
-    "понедельник": [
-        "1 пара: Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - Б302",
-        "2 пара: МДК.04.01 (Тимощук М.В., Егорова Ю.С.) - Б309",
-        "3 пара: Электроника и схемотехника (Леонидова Н.А.) - М202"
-    ],
-    "вторник": [
-        "0 пара: МДК 04 Учебная практика (Хожайнова М.Г., Тимощук М.В.) - Б308/Б309",
-        "1 пара: УП.04.02 (Хожайнова М.Г., Тимощук М.В.) - Б308/Б309",
-        "2 пара: МДК.01.01 Операционные системы и среды (Егорова Ю.С., Андреева Е.И.) - Б407",
-        "3 пара: Дополнительная профессия п/гр 1 (Панасюк А.Д.) - Б304"
-    ],
-    "среда": [
-        "0 пара: МДК.01.02 Базы данных (Байдина Ю.А.) - Б302",
-        "1 пара: Технологии физического уровня передачи данных (Груздев В.В., Серова А.М.) - Б304, Б204",
-        "2 пара: Технологии физического уровня передачи данных (Груздев В.В.) - Б501"
-    ],
-    "четверг": [
-        "0 пара: МДК.04.02 (Тимощук М.В.) - ДОТ",
-        "1 пара: МДК.04 Учебная практика (Тимощук М.В.) - ДОТ",
-        "2 пара: Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - ДОТ",
-        "3 пара: Математика (Холманова В.М.) - ДОТ"
-    ],
-    "пятница": [
-        "0 пара: Электроника и схемотехника п/гр.2 (Леонидова Н.А.) - Б509",
-        "1 пара: Электроника и схемотехника п/гр.2 (Леонидова Н.А.) - Б509",
-        "2 пара: МДК 01.01 Операционные системы и среды (Егорова Ю.С.) - А401",
-        "3 пара: Организационно-правовое обеспечение информационной безопасности (Воробьева Н.Е.) - Б502"
-    ],
-    "суббота": [
-        "1 пара: Дополнительная профессия п/гр.2 (Юров А.А.) - Б305",
-        "2 пара: Физическая культура (Куликова А.А.) - спорт зал",
-        "3 пара: Иностранный язык в профессиональной деятельности (Зубковская Е.А., Смирнова Е.Ф.) - А413, А412"
-    ]
+SCHEDULE_DEN_FULL = {
+    "понедельник": {
+        "1": "Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - Б302",
+        "2": "МДК.04.01 (Тимощук М.В., Егорова Ю.С.) - Б309",
+        "3": "Электроника и схемотехника (Леонидова Н.А.) - М202",
+    },
+    "вторник": {
+        "0": "МДК 04 Учебная практика (Хожайнова М.Г., Тимощук М.В.) - Б308/Б309",
+        "1": "УП.04.02 (Хожайнова М.Г., Тимощук М.В.) - Б308/Б309",
+        "2": "МДК.01.01 Операционные системы и среды (Егорова Ю.С., Андреева Е.И.) - Б407",
+        "3": "Дополнительная профессия п/гр 1 (Панасюк А.Д.) - Б304",
+    },
+    "среда": {
+        "0": "МДК.01.02 Базы данных (Байдина Ю.А.) - Б302",
+        "1": "Технологии физического уровня передачи данных (Груздев В.В., Серова А.М.) - Б304, Б204",
+        "2": "Технологии физического уровня передачи данных (Груздев В.В.) - Б501",
+    },
+    "четверг": {
+        "0": "МДК.04.02 (Тимощук М.В.) - ДОТ",
+        "1": "МДК.04 Учебная практика (Тимощук М.В.) - ДОТ",
+        "2": "Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - ДОТ",
+        "3": "Математика (Холманова В.М.) - ДОТ",
+    },
+    "пятница": {
+        "0": "Электроника и схемотехника п/гр.2 (Леонидова Н.А.) - Б509",
+        "1": "Электроника и схемотехника п/гр.2 (Леонидова Н.А.) - Б509",
+        "2": "МДК 01.01 Операционные системы и среды (Егорова Ю.С.) - А401",
+        "3": "Организационно-правовое обеспечение информационной безопасности (Воробьева Н.Е.) - Б502",
+    },
+    "суббота": {
+        "1": "Дополнительная профессия п/гр.2 (Юров А.А.) - Б305",
+        "2": "Физическая культура (Куликова А.А.) - спорт зал",
+        "3": "Иностранный язык в профессиональной деятельности (Зубковская Е.А., Смирнова Е.Ф.) - А413, А412",
+    },
 }
 
-# ---------- Вспомогательные функции ----------
+# ---------- Функции ----------
 def expand_pair_numbers(pair_str: str):
-    if not pair_str:
-        return []
-    pair_str = str(pair_str).strip()
     if ',' in pair_str:
         parts = pair_str.split(',')
         result = []
@@ -105,7 +100,7 @@ def expand_pair_numbers(pair_str: str):
         start, end = map(int, pair_str.split('-'))
         return [str(i) for i in range(start, end+1)]
     else:
-        return [pair_str]
+        return [pair_str.strip()]
 
 def split_subject_and_teacher(text: str):
     text = text.strip()
@@ -119,42 +114,48 @@ def split_subject_and_teacher(text: str):
     else:
         return text, "—"
 
-def parse_zameny_from_html(html_text: str):
-    soup = BeautifulSoup(html_text, 'html.parser')
-    table = soup.find('table')
-    if not table:
-        return []
+def parse_zameny_from_text(text: str):
+    lines = text.splitlines()
     results = []
-    rows = table.find_all('tr')
-    for row in rows:
-        cells = row.find_all('td')
-        if len(cells) < 6:
+    for line in lines:
+        if GROUP not in line:
             continue
-        group_cell = cells[1].get_text(strip=True)
-        if GROUP not in group_cell:
+        group_idx = line.find(GROUP)
+        after_group = line[group_idx + len(GROUP):].lstrip()
+        pair_match = re.match(r'([\d,\-]+)', after_group)
+        if not pair_match:
             continue
-        pair_numbers_str = cells[2].get_text(strip=True)
-        original = cells[3].get_text(strip=True)
-        replacement_full = cells[4].get_text(strip=True)
-        room = cells[5].get_text(strip=True)
-        if not replacement_full or replacement_full in ("—", "-"):
+        pair_numbers_str = pair_match.group(1)
+        rest = after_group[len(pair_numbers_str):].lstrip()
+        parts = re.split(r'\s{2,}', rest)
+        if len(parts) < 2:
             continue
-        pair_list = expand_pair_numbers(pair_numbers_str)
-        for pair_num in pair_list:
+        original = parts[0].strip()
+        replacement_full = parts[1].strip()
+        room = parts[2].strip() if len(parts) > 2 else "—"
+        if replacement_full == "" or replacement_full == "—" or "по расписанию" in replacement_full.lower():
+            pair_list = expand_pair_numbers(pair_numbers_str)
+            for pair_num in pair_list:
+                results.append({
+                    "pair": pair_num,
+                    "type": "dist",
+                    "room": room,
+                })
+        else:
             replacement_subj, replacement_teacher = split_subject_and_teacher(replacement_full)
-            results.append({
-                "pair": pair_num,
-                "original": original if original else "—",
-                "replacement": replacement_subj,
-                "teacher": replacement_teacher,
-                "room": room if room else "—"
-            })
+            pair_list = expand_pair_numbers(pair_numbers_str)
+            for pair_num in pair_list:
+                results.append({
+                    "pair": pair_num,
+                    "type": "replace",
+                    "replacement": replacement_subj,
+                    "teacher": replacement_teacher,
+                    "room": room,
+                })
     return results
 
-def extract_metadata_from_html(html_text: str):
-    soup = BeautifulSoup(html_text, 'html.parser')
-    body_text = soup.get_text()
-    date_match = re.search(r'(\d+)\s+([а-я]+)\s+(\d{4})\s+года', body_text)
+def extract_metadata_from_file(text: str):
+    date_match = re.search(r'(\d+)\s+([а-я]+)\s+(\d{4})\s+года', text)
     if not date_match:
         return None, None
     day = int(date_match.group(1))
@@ -169,43 +170,43 @@ def extract_metadata_from_html(html_text: str):
         file_date = datetime(year, month, day)
     except:
         file_date = None
-    type_match = re.search(r'\((Числитель|Знаменатель)\)', body_text)
+    type_match = re.search(r'\((Числитель|Знаменатель)\)', text)
     week_type = type_match.group(1) if type_match else None
     return file_date, week_type
 
-def apply_replacements(schedule_list, replacements):
+def build_final_schedule(week_type, target_weekday, replacements):
+    if week_type == "Числитель":
+        base = SCHEDULE_NUM_FULL.get(target_weekday, {})
+    else:
+        base = SCHEDULE_DEN_FULL.get(target_weekday, {})
     repl_dict = {}
     for r in replacements:
-        pair_num = r['pair']
-        if r['replacement'] == "Снято":
-            repl_dict[pair_num] = None
-        else:
-            room = r['room']
-            teacher = r['teacher']
-            subject = r['replacement']
-            if room and room != "—":
-                new_line = f"{subject} ({teacher}) - <b>{room}</b>"
+        pair = r['pair']
+        if r['type'] == 'replace':
+            repl_dict[pair] = ('replace', f"{r['replacement']} ({r['teacher']}) - <b>{r['room']}</b>")
+        elif r['type'] == 'dist':
+            if pair in base:
+                original_line = base[pair]
+                base_part = re.sub(r'\s*\-.*$', '', original_line)
+                new_line = f"{base_part} - <b>{r['room']}</b>"
             else:
-                new_line = f"{subject} ({teacher})"
-            repl_dict[pair_num] = new_line
+                new_line = f"Занятие - <b>{r['room']}</b>"
+            repl_dict[pair] = ('dist', new_line)
+    all_pair_nums = set(base.keys()) | set(repl_dict.keys())
     result = []
-    for line in schedule_list:
-        pair_match = re.match(r'(\d+)\s+пара:', line)
-        if pair_match:
-            pair_num = pair_match.group(1)
-            if pair_num in repl_dict:
-                if repl_dict[pair_num] is None:
-                    continue
-                else:
-                    result.append(f"{pair_num} пара: {repl_dict[pair_num]} <i>[ЗАМЕНА]</i>")
+    for pair_num in sorted(all_pair_nums, key=int):
+        if pair_num in repl_dict:
+            typ, line = repl_dict[pair_num]
+            if typ == 'replace':
+                result.append(f"{pair_num} пара: {line} <i>[ЗАМЕНА]</i>")
             else:
-                new_line = re.sub(r' - (.*?)$', r' - <b>\1</b>', line)
-                result.append(new_line)
+                result.append(f"{pair_num} пара: {line} <i>[ДОТ]</i>")
         else:
-            result.append(line)
+            base_line = base[pair_num]
+            base_line = re.sub(r' - (.*?)$', r' - <b>\1</b>', base_line)
+            result.append(f"{pair_num} пара: {base_line}")
     return result
 
-# ---------- Команда /zam (итоговое расписание) ----------
 async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Загружаю расписание...")
     try:
@@ -214,74 +215,46 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if response.status_code != 200:
             await update.message.reply_text("Не удалось загрузить страницу с заменами.")
             return
-        html_text = response.text
-        file_date, week_type = extract_metadata_from_html(html_text)
+        file_text = response.text
+        file_date, week_type = extract_metadata_from_file(file_text)
         if not file_date:
             await update.message.reply_text("Не удалось определить дату в файле замен.")
             return
         if not week_type:
-            await update.message.reply_text("Не удалось определить тип недели.")
+            await update.message.reply_text("Не удалось определить тип недели (числитель/знаменатель).")
             return
         weekdays_ru = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
         target_weekday = weekdays_ru[file_date.weekday()]
         if target_weekday == "воскресенье":
             await update.message.reply_text("В этот день пар нет.")
             return
-        if week_type == "Числитель":
-            base_schedule = SCHEDULE_NUM.get(target_weekday, [])
-        else:
-            base_schedule = SCHEDULE_DEN.get(target_weekday, [])
-        if not base_schedule:
-            await update.message.reply_text(f"Расписание на {target_weekday} не найдено.")
-            return
-        replacements = parse_zameny_from_html(html_text)
-        final_schedule = apply_replacements(base_schedule, replacements)
+        replacements = parse_zameny_from_text(file_text)
+        final_schedule = build_final_schedule(week_type, target_weekday, replacements)
         date_str = file_date.strftime("%d.%m.%Y")
         message = f"📅 Расписание на {date_str} ({target_weekday}, {week_type}):\n\n"
         for line in final_schedule:
             message += f"• {line}\n"
         if not replacements:
             message += f"\n✅ Замен на {date_str} нет."
+        # Добавляем кликабельную ссылку
+        message += f"\n\n<a href='{URL}'>Проверить замены</a>"
         await update.message.reply_text(message, parse_mode='HTML')
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка: {str(e)}")
-
-# ---------- Команда /zamena (показать сырые данные о заменах) ----------
-async def show_raw_replacements(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Проверяю замены для ИБ1-21...")
-    try:
-        response = requests.get(URL, timeout=15)
-        response.encoding = 'utf-8'
-        if response.status_code != 200:
-            await update.message.reply_text("Не удалось загрузить страницу.")
-            return
-        html_text = response.text
-        replacements = parse_zameny_from_html(html_text)
-        if not replacements:
-            await update.message.reply_text("Замены для группы ИБ1-21 не найдены.")
-            return
-        message = "🔍 Найденные замены (сырые данные):\n\n"
-        for r in replacements:
-            message += f"Пара {r['pair']}: {r['original']} → {r['replacement']} (преп. {r['teacher']}, ауд. {r['room']})\n"
-        await update.message.reply_text(message)
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {str(e)}")
 
 async def ib_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🤖 Бот расписания и замен для группы {GROUP}\n"
-        "Команда /zam — итоговое расписание с заменами\n"
-        "Команда /zamena — показать, какие замены найдены (для отладки)",
+        "Команда /zam — показать итоговое расписание на дату, указанную в файле замен.\n"
+        "Бот сам применяет замены и помечает их.",
         parse_mode='HTML'
     )
 
-# ---------- Запуск ----------
 async def main():
     import logging
     logging.basicConfig(level=logging.INFO)
     application = Application.builder().token(TOKEN).updater(None).build()
     application.add_handler(CommandHandler("zam", get_schedule))
-    application.add_handler(CommandHandler("zamena", show_raw_replacements))
     application.add_handler(CommandHandler("ib", ib_command))
     await application.initialize()
     render_url = os.environ.get("RENDER_EXTERNAL_URL")
