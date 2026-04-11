@@ -48,6 +48,7 @@ SCHEDULE_NUM_FULL = {
     },
 }
 
+# ---------- Базовое расписание (знаменатель) ----------
 SCHEDULE_DEN_FULL = {
     "понедельник": {
         "1": "Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - Б302",
@@ -106,6 +107,7 @@ def split_subject_and_teacher(text: str):
     text = text.strip()
     if not text or text == "Снято":
         return text, "—"
+    # Ищем фамилию с инициалами в конце
     match = re.search(r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.(?:[А-ЯЁ]\.)?)$', text)
     if match:
         teacher = match.group(1)
@@ -115,36 +117,65 @@ def split_subject_and_teacher(text: str):
         return text, "—"
 
 def parse_zameny_from_text(text: str):
+    """
+    Разбирает строки вида:
+    "10  ИБ1-21    0    Доп.проф.п/гр.1 Панасюк А.Д.    Б304"
+    "11  ИБ1-21    3    Электроника    Сп.зал"
+    "38  ИБ1-21    0,1    МДК 04.01 УП 04    по расписанию    ДОТ"
+    """
     lines = text.splitlines()
     results = []
     for line in lines:
         if GROUP not in line:
             continue
-        group_idx = line.find(GROUP)
-        after_group = line[group_idx + len(GROUP):].lstrip()
+        # Ищем позицию группы
+        group_pos = line.find(GROUP)
+        if group_pos == -1:
+            continue
+        # Обрезаем всё до и включая группу
+        after_group = line[group_pos + len(GROUP):].lstrip()
+        # Извлекаем номер пары (может быть "0", "0,1", "0-3")
         pair_match = re.match(r'([\d,\-]+)', after_group)
         if not pair_match:
             continue
         pair_numbers_str = pair_match.group(1)
+        # Удаляем номер пары из строки
         rest = after_group[len(pair_numbers_str):].lstrip()
+        # Теперь в rest могут быть колонки, разделённые двумя и более пробелами
+        # Разбиваем по двум и более пробелам
         parts = re.split(r'\s{2,}', rest)
-        if len(parts) < 2:
+        # Удаляем пустые части
+        parts = [p.strip() for p in parts if p.strip()]
+        if len(parts) == 0:
             continue
-        original = parts[0].strip()
-        replacement_full = parts[1].strip()
-        room = parts[2].strip() if len(parts) > 2 else "—"
-        if replacement_full == "" or replacement_full == "—" or "по расписанию" in replacement_full.lower():
-            pair_list = expand_pair_numbers(pair_numbers_str)
-            for pair_num in pair_list:
+        # Определяем, что есть что. В зависимости от количества частей:
+        # 2 части: [замена, аудитория] (исходная дисциплина отсутствует)
+        # 3 части: [исходная, замена, аудитория]
+        # 1 часть: [замена] (аудитория неизвестна)
+        if len(parts) == 2:
+            replacement_full = parts[0]
+            room = parts[1]
+            is_dist = (replacement_full == "" or replacement_full == "—" or "по расписанию" in replacement_full.lower())
+        elif len(parts) == 3:
+            # original = parts[0] (не используется)
+            replacement_full = parts[1]
+            room = parts[2]
+            is_dist = (replacement_full == "" or replacement_full == "—" or "по расписанию" in replacement_full.lower())
+        else:  # 1 часть
+            replacement_full = parts[0]
+            room = "—"
+            is_dist = (replacement_full == "" or replacement_full == "—" or "по расписанию" in replacement_full.lower())
+        # Разворачиваем номера пар
+        pair_list = expand_pair_numbers(pair_numbers_str)
+        for pair_num in pair_list:
+            if is_dist:
                 results.append({
                     "pair": pair_num,
                     "type": "dist",
                     "room": room,
                 })
-        else:
-            replacement_subj, replacement_teacher = split_subject_and_teacher(replacement_full)
-            pair_list = expand_pair_numbers(pair_numbers_str)
-            for pair_num in pair_list:
+            else:
+                replacement_subj, replacement_teacher = split_subject_and_teacher(replacement_full)
                 results.append({
                     "pair": pair_num,
                     "type": "replace",
@@ -155,6 +186,7 @@ def parse_zameny_from_text(text: str):
     return results
 
 def extract_metadata_from_file(text: str):
+    # Извлекаем дату и тип недели
     date_match = re.search(r'(\d+)\s+([а-я]+)\s+(\d{4})\s+года', text)
     if not date_match:
         return None, None
@@ -170,6 +202,7 @@ def extract_metadata_from_file(text: str):
         file_date = datetime(year, month, day)
     except:
         file_date = None
+    # Ищем тип недели: (Числитель) или (Знаменатель)
     type_match = re.search(r'\((Числитель|Знаменатель)\)', text)
     week_type = type_match.group(1) if type_match else None
     return file_date, week_type
@@ -187,11 +220,13 @@ def build_final_schedule(week_type, target_weekday, replacements):
         elif r['type'] == 'dist':
             if pair in base:
                 original_line = base[pair]
+                # Убираем аудиторию
                 base_part = re.sub(r'\s*\-.*$', '', original_line)
                 new_line = f"{base_part} - <b>{r['room']}</b>"
             else:
                 new_line = f"Занятие - <b>{r['room']}</b>"
             repl_dict[pair] = ('dist', new_line)
+    # Собираем все номера пар из базы и из замен
     all_pair_nums = set(base.keys()) | set(repl_dict.keys())
     result = []
     for pair_num in sorted(all_pair_nums, key=int):
@@ -236,7 +271,6 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message += f"• {line}\n"
         if not replacements:
             message += f"\n✅ Замен на {date_str} нет."
-        # Добавляем кликабельную ссылку
         message += f"\n\n<a href='{URL}'>Проверить замены</a>"
         await update.message.reply_text(message, parse_mode='HTML')
     except Exception as e:
