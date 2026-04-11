@@ -87,8 +87,14 @@ SCHEDULE_DEN_FULL = {
 }
 
 # ---------- Функции ----------
+def format_date_russian(date: datetime) -> str:
+    months = [
+        "января", "февраля", "марта", "апреля", "мая", "июня",
+        "июля", "августа", "сентября", "октября", "ноября", "декабря"
+    ]
+    return f"{date.day} {months[date.month - 1]} {date.year}"
+
 def expand_pair_numbers(pair_str: str):
-    """Преобразует '0,1' или '0-3' в список ['0','1'] и т.д."""
     if ',' in pair_str:
         parts = pair_str.split(',')
         result = []
@@ -106,11 +112,9 @@ def expand_pair_numbers(pair_str: str):
         return [pair_str.strip()]
 
 def split_subject_and_teacher(text: str):
-    """Разделяет строку типа 'Физкультура Колескина И.А.' на предмет и преподавателя"""
     text = text.strip()
     if not text or text == "Снято" or text == "снято":
         return text, "—"
-    # Ищем фамилию с инициалами в конце
     match = re.search(r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.(?:[А-ЯЁ]\.)?)$', text)
     if match:
         teacher = match.group(1)
@@ -120,7 +124,6 @@ def split_subject_and_teacher(text: str):
         return text, "—"
 
 def parse_zameny_from_html(html_text: str):
-    """Парсит HTML-таблицу и возвращает список замен"""
     soup = BeautifulSoup(html_text, 'lxml')
     table = soup.find('table')
     if not table:
@@ -134,15 +137,11 @@ def parse_zameny_from_html(html_text: str):
         group_cell = cells[1].get_text(strip=True)
         if group_cell != GROUP:
             continue
-        # Номер пары (может быть "0", "0,1", "0-3")
         pair_numbers_str = cells[2].get_text(strip=True)
         if not pair_numbers_str:
             continue
-        # Дисциплина по замене (пятая ячейка)
         replacement_full = cells[4].get_text(strip=True)
-        # Аудитория (шестая ячейка)
         room = cells[5].get_text(strip=True)
-        # Определяем тип: дистант или замена
         is_dist = (replacement_full == "" or replacement_full == "—" or "по расписанию" in replacement_full.lower())
         pair_list = expand_pair_numbers(pair_numbers_str)
         for pair_num in pair_list:
@@ -164,9 +163,7 @@ def parse_zameny_from_html(html_text: str):
     return results
 
 def extract_metadata_from_html(html_text: str):
-    """Извлекает дату и тип недели из заголовка"""
     soup = BeautifulSoup(html_text, 'lxml')
-    # Ищем div с текстом "в расписании на ..."
     header_text = soup.get_text()
     date_match = re.search(r'(\d+)\s+([а-я]+)\s+(\d{4})\s+года', header_text)
     if not date_match:
@@ -243,7 +240,7 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         replacements = parse_zameny_from_html(html_text)
         final_schedule = build_final_schedule(week_type, target_weekday, replacements)
-        date_str = file_date.strftime("%d.%m.%Y")
+        date_str = format_date_russian(file_date)   # <--- здесь замена
         message = f"📅 Расписание на {date_str} ({target_weekday}, {week_type}):\n\n"
         for line in final_schedule:
             message += f"• {line}\n"
