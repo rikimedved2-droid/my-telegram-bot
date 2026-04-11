@@ -6,6 +6,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 import uvicorn
 import asyncio
 from datetime import datetime, timedelta
+from bs4 import BeautifulSoup
 
 TOKEN = "8612501783:AAGeBjR2_LP5DtfTPwzgg55nIjACKrH6hA0"
 URL = "https://menu.sttec.yar.ru/timetable/rasp_first.html"
@@ -87,6 +88,7 @@ SCHEDULE_DEN_FULL = {
 
 # ---------- Функции ----------
 def expand_pair_numbers(pair_str: str):
+    """Преобразует '0,1' или '0-3' в список ['0','1'] и т.д."""
     if ',' in pair_str:
         parts = pair_str.split(',')
         result = []
@@ -104,8 +106,9 @@ def expand_pair_numbers(pair_str: str):
         return [pair_str.strip()]
 
 def split_subject_and_teacher(text: str):
+    """Разделяет строку типа 'Физкультура Колескина И.А.' на предмет и преподавателя"""
     text = text.strip()
-    if not text or text == "Снято":
+    if not text or text == "Снято" or text == "снято":
         return text, "—"
     # Ищем фамилию с инициалами в конце
     match = re.search(r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.(?:[А-ЯЁ]\.)?)$', text)
@@ -116,56 +119,31 @@ def split_subject_and_teacher(text: str):
     else:
         return text, "—"
 
-def parse_zameny_from_text(text: str):
-    """
-    Разбирает строки вида:
-    "10  ИБ1-21    0    Доп.проф.п/гр.1 Панасюк А.Д.    Б304"
-    "11  ИБ1-21    3    Электроника    Сп.зал"
-    "38  ИБ1-21    0,1    МДК 04.01 УП 04    по расписанию    ДОТ"
-    """
-    lines = text.splitlines()
+def parse_zameny_from_html(html_text: str):
+    """Парсит HTML-таблицу и возвращает список замен"""
+    soup = BeautifulSoup(html_text, 'lxml')
+    table = soup.find('table')
+    if not table:
+        return []
+    rows = table.find_all('tr')
     results = []
-    for line in lines:
-        if GROUP not in line:
+    for row in rows:
+        cells = row.find_all('td')
+        if len(cells) < 6:
             continue
-        # Ищем позицию группы
-        group_pos = line.find(GROUP)
-        if group_pos == -1:
+        group_cell = cells[1].get_text(strip=True)
+        if group_cell != GROUP:
             continue
-        # Обрезаем всё до и включая группу
-        after_group = line[group_pos + len(GROUP):].lstrip()
-        # Извлекаем номер пары (может быть "0", "0,1", "0-3")
-        pair_match = re.match(r'([\d,\-]+)', after_group)
-        if not pair_match:
+        # Номер пары (может быть "0", "0,1", "0-3")
+        pair_numbers_str = cells[2].get_text(strip=True)
+        if not pair_numbers_str:
             continue
-        pair_numbers_str = pair_match.group(1)
-        # Удаляем номер пары из строки
-        rest = after_group[len(pair_numbers_str):].lstrip()
-        # Теперь в rest могут быть колонки, разделённые двумя и более пробелами
-        # Разбиваем по двум и более пробелам
-        parts = re.split(r'\s{2,}', rest)
-        # Удаляем пустые части
-        parts = [p.strip() for p in parts if p.strip()]
-        if len(parts) == 0:
-            continue
-        # Определяем, что есть что. В зависимости от количества частей:
-        # 2 части: [замена, аудитория] (исходная дисциплина отсутствует)
-        # 3 части: [исходная, замена, аудитория]
-        # 1 часть: [замена] (аудитория неизвестна)
-        if len(parts) == 2:
-            replacement_full = parts[0]
-            room = parts[1]
-            is_dist = (replacement_full == "" or replacement_full == "—" or "по расписанию" in replacement_full.lower())
-        elif len(parts) == 3:
-            # original = parts[0] (не используется)
-            replacement_full = parts[1]
-            room = parts[2]
-            is_dist = (replacement_full == "" or replacement_full == "—" or "по расписанию" in replacement_full.lower())
-        else:  # 1 часть
-            replacement_full = parts[0]
-            room = "—"
-            is_dist = (replacement_full == "" or replacement_full == "—" or "по расписанию" in replacement_full.lower())
-        # Разворачиваем номера пар
+        # Дисциплина по замене (пятая ячейка)
+        replacement_full = cells[4].get_text(strip=True)
+        # Аудитория (шестая ячейка)
+        room = cells[5].get_text(strip=True)
+        # Определяем тип: дистант или замена
+        is_dist = (replacement_full == "" or replacement_full == "—" or "по расписанию" in replacement_full.lower())
         pair_list = expand_pair_numbers(pair_numbers_str)
         for pair_num in pair_list:
             if is_dist:
@@ -185,9 +163,12 @@ def parse_zameny_from_text(text: str):
                 })
     return results
 
-def extract_metadata_from_file(text: str):
-    # Извлекаем дату и тип недели
-    date_match = re.search(r'(\d+)\s+([а-я]+)\s+(\d{4})\s+года', text)
+def extract_metadata_from_html(html_text: str):
+    """Извлекает дату и тип недели из заголовка"""
+    soup = BeautifulSoup(html_text, 'lxml')
+    # Ищем div с текстом "в расписании на ..."
+    header_text = soup.get_text()
+    date_match = re.search(r'(\d+)\s+([а-я]+)\s+(\d{4})\s+года', header_text)
     if not date_match:
         return None, None
     day = int(date_match.group(1))
@@ -202,8 +183,7 @@ def extract_metadata_from_file(text: str):
         file_date = datetime(year, month, day)
     except:
         file_date = None
-    # Ищем тип недели: (Числитель) или (Знаменатель)
-    type_match = re.search(r'\((Числитель|Знаменатель)\)', text)
+    type_match = re.search(r'\((Числитель|Знаменатель)\)', header_text)
     week_type = type_match.group(1) if type_match else None
     return file_date, week_type
 
@@ -220,13 +200,11 @@ def build_final_schedule(week_type, target_weekday, replacements):
         elif r['type'] == 'dist':
             if pair in base:
                 original_line = base[pair]
-                # Убираем аудиторию
                 base_part = re.sub(r'\s*\-.*$', '', original_line)
                 new_line = f"{base_part} - <b>{r['room']}</b>"
             else:
                 new_line = f"Занятие - <b>{r['room']}</b>"
             repl_dict[pair] = ('dist', new_line)
-    # Собираем все номера пар из базы и из замен
     all_pair_nums = set(base.keys()) | set(repl_dict.keys())
     result = []
     for pair_num in sorted(all_pair_nums, key=int):
@@ -250,8 +228,8 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if response.status_code != 200:
             await update.message.reply_text("Не удалось загрузить страницу с заменами.")
             return
-        file_text = response.text
-        file_date, week_type = extract_metadata_from_file(file_text)
+        html_text = response.text
+        file_date, week_type = extract_metadata_from_html(html_text)
         if not file_date:
             await update.message.reply_text("Не удалось определить дату в файле замен.")
             return
@@ -263,7 +241,7 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if target_weekday == "воскресенье":
             await update.message.reply_text("В этот день пар нет.")
             return
-        replacements = parse_zameny_from_text(file_text)
+        replacements = parse_zameny_from_html(html_text)
         final_schedule = build_final_schedule(week_type, target_weekday, replacements)
         date_str = file_date.strftime("%d.%m.%Y")
         message = f"📅 Расписание на {date_str} ({target_weekday}, {week_type}):\n\n"
