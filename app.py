@@ -193,28 +193,35 @@ def build_final_schedule(week_type, target_weekday, replacements):
     for r in replacements:
         pair = r['pair']
         if r['type'] == 'replace':
-            repl_dict[pair] = ('replace', f"{r['replacement']} ({r['teacher']}) - <b>{r['room']}</b>")
+            repl_dict[pair] = ('replace', f"{r['replacement']} ({r['teacher']}) — <b>{r['room']}</b>")
         elif r['type'] == 'dist':
             if pair in base:
                 original_line = base[pair]
                 base_part = re.sub(r'\s*\-.*$', '', original_line)
-                new_line = f"{base_part} - <b>{r['room']}</b>"
+                new_line = f"{base_part} — <b>{r['room']}</b>"
             else:
-                new_line = f"Занятие - <b>{r['room']}</b>"
+                new_line = f"Занятие — <b>{r['room']}</b>"
             repl_dict[pair] = ('dist', new_line)
     all_pair_nums = set(base.keys()) | set(repl_dict.keys())
+    number_emojis = ["0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"]
     result = []
     for pair_num in sorted(all_pair_nums, key=int):
+        num = int(pair_num)
+        if 0 <= num <= 9:
+            pair_emoji = number_emojis[num]
+        else:
+            pair_emoji = f"{num}️⃣"
         if pair_num in repl_dict:
             typ, line = repl_dict[pair_num]
             if typ == 'replace':
-                result.append(f"{pair_num} пара: {line} <i>[ЗАМЕНА]</i>")
-            else:
-                result.append(f"{pair_num} пара: {line} <i>[ДОТ]</i>")
+                result.append(f"{pair_emoji} → {line} 🔁")
+            else:  # dist
+                result.append(f"{pair_emoji} → {line} 💻")
         else:
             base_line = base[pair_num]
-            base_line = re.sub(r' - (.*?)$', r' - <b>\1</b>', base_line)
-            result.append(f"{pair_num} пара: {base_line}")
+            base_line = re.sub(r' - ', ' — ', base_line)
+            base_line = re.sub(r' — (.*?)$', r' — <b>\1</b>', base_line)
+            result.append(f"{pair_emoji} → {base_line}")
     return result
 
 async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -241,12 +248,9 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         replacements = parse_zameny_from_html(html_text)
         final_schedule = build_final_schedule(week_type, target_weekday, replacements)
         date_str = format_date_russian(file_date)
-        message = f"📅 Расписание на {date_str} ({target_weekday}, {week_type}):\n\n"
-        for line in final_schedule:
-            message += f"• {line}\n"
-        if not replacements:
-            message += f"\n✅ Замен на {date_str} нет."
-        message += f"\n\n<a href='{URL}'>Проверить замены</a>"
+        message = f"📅 Расписание на {date_str} ({target_weekday}, {week_type})\n\n"
+        message += "\n".join(final_schedule)
+        message += f"\n\n🔗 <a href='{URL}'>Проверить замены</a>"
         await update.message.reply_text(message, parse_mode='HTML')
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {str(e)}")
@@ -266,6 +270,7 @@ async def main():
     application = Application.builder().token(TOKEN).updater(None).build()
     application.add_handler(CommandHandler("zam", get_schedule))
     application.add_handler(CommandHandler("ib", ib_command))
+    application.add_handler(CommandHandler("start", ib_command))
     await application.initialize()
     render_url = os.environ.get("RENDER_EXTERNAL_URL")
     if render_url:
