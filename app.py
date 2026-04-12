@@ -193,15 +193,15 @@ def build_final_schedule(week_type, target_weekday, replacements):
     for r in replacements:
         pair = r['pair']
         if r['type'] == 'replace':
-            repl_dict[pair] = ('replace', f"{r['replacement']} ({r['teacher']}) — <b>{r['room']}</b>")
+            repl_dict[pair] = ('replace', f"{r['replacement']} ({r['teacher']})", r['room'])
         elif r['type'] == 'dist':
             if pair in base:
                 original_line = base[pair]
                 base_part = re.sub(r'\s*\-.*$', '', original_line)
-                new_line = f"{base_part} — <b>{r['room']}</b>"
+                new_line = base_part
             else:
-                new_line = f"Занятие — <b>{r['room']}</b>"
-            repl_dict[pair] = ('dist', new_line)
+                new_line = "Занятие"
+            repl_dict[pair] = ('dist', new_line, r['room'])
     all_pair_nums = set(base.keys()) | set(repl_dict.keys())
     number_emojis = ["0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"]
     result = []
@@ -212,16 +212,21 @@ def build_final_schedule(week_type, target_weekday, replacements):
         else:
             pair_emoji = f"{num}️⃣"
         if pair_num in repl_dict:
-            typ, line = repl_dict[pair_num]
+            typ, line, room = repl_dict[pair_num]
             if typ == 'replace':
-                result.append(f"{pair_emoji} → {line} 🔁")
+                result.append(f"{pair_emoji}🔁 → {line}\nКаб: {room}")
             else:  # dist
-                result.append(f"{pair_emoji} → {line} 💻")
+                result.append(f"{pair_emoji}💻 → {line}\nКаб: {room}")
         else:
             base_line = base[pair_num]
-            base_line = re.sub(r' - ', ' — ', base_line)
-            base_line = re.sub(r' — (.*?)$', r' — <b>\1</b>', base_line)
-            result.append(f"{pair_emoji} → {base_line}")
+            match = re.match(r'^(.*?)\s*-\s*(.*?)$', base_line)
+            if match:
+                subject_part = match.group(1).strip()
+                room = match.group(2).strip()
+            else:
+                subject_part = base_line
+                room = "?"
+            result.append(f"{pair_emoji} → {subject_part}\nКаб: {room}")
     return result
 
 async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -249,7 +254,7 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         final_schedule = build_final_schedule(week_type, target_weekday, replacements)
         date_str = format_date_russian(file_date)
         message = f"📅 Расписание на {date_str} ({target_weekday}, {week_type})\n\n"
-        message += "\n".join(final_schedule)
+        message += "\n\n".join(final_schedule)
         message += f"\n\n🔗 <a href='{URL}'>Проверить замены</a>"
         await update.message.reply_text(message, parse_mode='HTML')
     except Exception as e:
