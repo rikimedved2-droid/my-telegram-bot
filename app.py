@@ -240,7 +240,7 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         replacements = parse_zameny_from_html(html_text)
         final_schedule = build_final_schedule(week_type, target_weekday, replacements)
-        date_str = format_date_russian(file_date)   # <--- здесь замена
+        date_str = format_date_russian(file_date)
         message = f"📅 Расписание на {date_str} ({target_weekday}, {week_type}):\n\n"
         for line in final_schedule:
             message += f"• {line}\n"
@@ -253,9 +253,10 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def ib_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        f"🤖 Бот расписания и замен для группы {GROUP}\n"
-        "Команда /zam — показать итоговое расписание на дату, указанную в файле замен.\n"
-        "Бот сам применяет замены и помечает их.",
+        "🤖 Бот замен для группы ИБ1-21📝\n\n"
+        "Команда /zam — показать актуальное расписание с учетом всех замен.\n"
+        "Команда /ib — чтобы снова увидеть это сообщение.\n\n"
+        "Успехов в использовании!",
         parse_mode='HTML'
     )
 
