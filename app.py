@@ -214,9 +214,9 @@ def build_final_schedule(week_type, target_weekday, replacements):
         if pair_num in repl_dict:
             typ, line, room = repl_dict[pair_num]
             if typ == 'replace':
-                result.append(f"{pair_emoji}🔁 → {line}\nКаб: {room}")
+                result.append(f"{pair_emoji}_🔁 → {line}\nКаб: {room}")
             else:  # dist
-                result.append(f"{pair_emoji}💻 → {line}\nКаб: {room}")
+                result.append(f"{pair_emoji} → {line}\nКаб: {room}")
         else:
             base_line = base[pair_num]
             match = re.match(r'^(.*?)\s*-\s*(.*?)$', base_line)
@@ -267,9 +267,8 @@ async def ib_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Отправь команду /zam — бот покажет расписание на тот день, который указан в официальном файле замен (обычно сегодня или завтра).\n"
         "• Бот сам определяет числитель/знаменатель и подставляет все замены.\n\n"
         "🔍 <b>Что означают значки:</b>\n"
-        "• <code>0️⃣🔁</code> — пара с заменой (рядом эмодзи 🔁)\n"
-        "• <code>0️⃣💻</code> — дистант (пара перенесена в ДОТ, предмет и преподаватель те же)\n"
-        "• <code>0️⃣ →</code> — обычная пара без изменений\n"
+        "• <code>0️⃣_🔁</code> — пара с заменой\n"
+        "• <code>0️⃣ →</code> — обычная пара без изменений (или дистант с аудиторией ДОТ)\n"
         "• <b>Каб:</b> — аудитория (или ДОТ, Сп.зал и т.д.)\n\n"
         "📎 Внизу каждого сообщения есть ссылка <i>«Проверить замены»</i> — она ведёт на официальный сайт.\n\n"
         "Успехов в учёбе! 📚",
@@ -282,7 +281,7 @@ async def main():
     application = Application.builder().token(TOKEN).updater(None).build()
     application.add_handler(CommandHandler("zam", get_schedule))
     application.add_handler(CommandHandler("ib", ib_command))
-    application.add_handler(CommandHandler("start", ib_command))
+    application.add_handler(CommandHandler("start", ib_command))  # /start делает то же самое
     await application.initialize()
     render_url = os.environ.get("RENDER_EXTERNAL_URL")
     if render_url:
