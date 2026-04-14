@@ -147,8 +147,12 @@ async def cancel_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ---------- ОБРАБОТЧИКИ КОМАНД ДОМАШКИ ----------
+# Для подтверждения удаления используем простой словарь
+pending_deletions = {}
+
 async def del_hw(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
         await update.message.reply_text("⛔ Нет прав.")
         return
     if not context.args or not context.args[0].isdigit():
@@ -159,11 +163,29 @@ async def del_hw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if temp_num < 1 or temp_num > len(tasks):
         await update.message.reply_text("❌ Неверный номер.")
         return
-    real_id, task_text, _, _ = tasks[temp_num - 1]
+    real_id, task_text, due_date, _ = tasks[temp_num - 1]
+    # Сохраняем информацию о задании для подтверждения
+    pending_deletions[user_id] = (real_id, task_text, temp_num)
+    await update.message.reply_text(f"⚠️ Точно удалить задание №{temp_num}?\n{task_text}\nОтправь /confirm_del или /cancel_del")
+
+async def confirm_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in pending_deletions:
+        await update.message.reply_text("Нет заданий на подтверждение.")
+        return
+    real_id, task_text, temp_num = pending_deletions.pop(user_id)
     if delete_task_db(real_id):
-        await update.message.reply_text(f"🗑 Удалено: {task_text}")
+        await update.message.reply_text(f"🗑 Удалено задание №{temp_num}:\n{task_text}")
     else:
         await update.message.reply_text("Ошибка удаления.")
+
+async def cancel_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id in pending_deletions:
+        del pending_deletions[user_id]
+        await update.message.reply_text("✅ Удаление отменено.")
+    else:
+        await update.message.reply_text("Нет активного запроса на удаление.")
 
 async def show_hw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tasks = get_all_tasks_db()
@@ -176,7 +198,7 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👑 <b>Админ-команды:</b>\n"
         "/add — добавить задание (диалог)\n"
-        "/del &lt;номер&gt; — удалить задание\n"
+        "/del &lt;номер&gt; — удалить задание (с подтверждением)\n"
         "/admin — эта справка\n\n"
         "Все команды работают в личке с ботом.",
         parse_mode='HTML'
@@ -373,16 +395,22 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {str(e)}")
 
+# ОРИГИНАЛЬНАЯ СПРАВКА (полная, как было)
 async def ib_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🤖 <b>Бот замен и домашки для ИБ1-21</b>\n\n"
-        "📌 <b>Команды:</b>\n"
-        "• /zam — расписание с заменами\n"
-        "• /hw — список домашних заданий\n"
-        "• /add — добавить задание (только админ, диалог)\n"
-        "• /del &lt;номер&gt; — удалить задание (админ)\n"
-        "• /admin — справка для админа\n\n"
-        "Успехов! 📚",
+        "🤖 <b>Бот замен для группы ИБ1-21</b>\n\n"
+        "📌 <b>Как пользоваться:</b>\n"
+        "• Команда /zam — покажет расписание на тот день, который указан на официальном сайте замен\n"
+        "• Бот сам определяет числитель/знаменатель\n"
+        "• Автоматически подставляет замены в расписание\n\n"
+        "🔍 <b>Информация по обозначениям:</b>\n"
+        "• <code>0️⃣_🔁</code> — пара с заменой\n"
+        "• <code>0️⃣ →</code> — обычная пара без изменений\n"
+        "• <b>Каб:</b> — аудитория (или ДОТ, Сп.зал и т.д.)\n\n"
+        "📎 Внизу каждого сообщения есть ссылка «Проверить замены» — на всякий случай, если не уверены в правильности отображения информации\n\n"
+        "📚 <b>Домашние задания:</b>\n"
+        "• /hw — показать список заданий\n\n"
+        "Успехов в учёбе! 📚",
         parse_mode='HTML'
     )
 
@@ -400,6 +428,8 @@ async def main():
     # Команды домашки
     application.add_handler(CommandHandler("hw", show_hw))
     application.add_handler(CommandHandler("del", del_hw))
+    application.add_handler(CommandHandler("confirm_del", confirm_del))
+    application.add_handler(CommandHandler("cancel_del", cancel_del))
     application.add_handler(CommandHandler("admin", admin_help))
     application.add_handler(CommandHandler("myid", my_id))
 
