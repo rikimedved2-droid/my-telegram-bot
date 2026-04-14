@@ -1,18 +1,224 @@
-                             import os
-import requests
+import os
 import re
+import sqlite3
+import asyncio
+import logging
+from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 import uvicorn
-import asyncio
-from datetime import datetime, timedelta
+from starlette.applications import Starlette
+from starlette.routing import Route
+from starlette.requests import Request
+from starlette.responses import Response, PlainTextResponse
+import requests
 from bs4 import BeautifulSoup
 
-TOKEN = "8612501783:AAGeBjR2_LP5DtfTPwzgg55nIjACKrH6hA0"
-URL = "https://menu.sttec.yar.ru/timetable/rasp_first.html"
-GROUP = "ИБ1-21"
+# ---------- КОНФИГУРАЦИЯ ----------
+TOKEN = "8612501783:AAGeBjR2_LP5DtfTPwzgg55nIjACKrH6hA0"  # твой токен, не трогай
+ADMIN_USER_ID = 1207797393  # ПОСЛЕ /myid ВСТАВЬ СЮДА СВОЙ ID (число)
 
-# ---------- Базовое расписание (числитель) ----------
+# ---------- БАЗА ДАННЫХ ДЛЯ ДОМАШКИ (SQLite) ----------
+DB_PATH = "homework.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS homework (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )''')
+    conn.commit()
+    conn.close()
+
+def add_task_db(task_text):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("INSERT INTO homework (task, created_at) VALUES (?, ?)",
+              (task_text, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit()
+    new_id = c.lastrowid
+    conn.close()
+    return new_id
+
+def get_all_tasks_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT id, task, created_at FROM homework ORDER BY created_at")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def delete_task_db(task_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM homework WHERE id = ?", (task_id,))
+    affected = c.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
+
+async def is_admin(user_id: int) -> bool:
+    return user_id == ADMIN_USER_ID
+
+def format_hw_list(tasks):
+    if not tasks:
+        return "📭 Нет текущих домашних заданий."
+    lines = ["📚 Текущие домашние задания:\n"]
+    for idx, (db_id, task, created_at) in enumerate(tasks, start=1):
+        created_date = created_at.split()[0] if created_at else "неизвестно"
+        lines.append(f"{idx}️⃣ {task}\n   (добавлено {created_date})")
+    return "\n".join(lines)
+
+# ---------- ОБРАБОТЧИКИ ДОМАШКИ ----------
+async def add_hw(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not await is_admin(user_id):
+        await update.message.reply_text("⛔ У вас нет прав добавлять домашние задания.")
+        return
+    if not context.args:
+        await update.message.reply_text("📝 Использование: /addhw <текст задания>")
+        return
+    task_text = " ".join(context.args)
+    new_id = add_task_db(task_text)
+    await update.message.reply_text(f"✅ Добавлено задание №{new_id}:\n{task_text}")
+
+async def rm_hw(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not await is_admin(user_id):
+        await update.message.reply_text("⛔ У вас нет прав удалять задания.")
+        return
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("❌ Использование: /rmhw <номер> (номер из списка /hw)")
+        return
+    temp_num = int(context.args[0])
+    tasks = get_all_tasks_db()
+    if temp_num < 1 or temp_num > len(tasks):
+        await update.message.reply_text("❌ Неверный номер. Используйте /hw для просмотра списка.")
+        return
+    real_id, task_text, _ = tasks[temp_num - 1]
+    if delete_task_db(real_id):
+        await update.message.reply_text(f"🗑 Задание №{temp_num} удалено:\n{task_text}")
+    else:
+        await update.message.reply_text("❌ Ошибка при удалении.")
+
+async def show_hw(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tasks = get_all_tasks_db()
+    await update.message.reply_text(format_hw_list(tasks))
+
+async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"🆔 Ваш Telegram ID: `{update.effective_user.id}`", parse_mode='Markdown')
+
+# ---------- ВСЕ СТАРЫЕ ФУНКЦИИ ДЛЯ РАСПИСАНИЯ И ЗАМЕН (БЕЗ ИЗМЕНЕНИЙ) ----------
+def format_date_russian(date: datetime) -> str:
+    months = [
+        "января", "февраля", "марта", "апреля", "мая", "июня",
+        "июля", "августа", "сентября", "октября", "ноября", "декабря"
+    ]
+    return f"{date.day} {months[date.month - 1]} {date.year}"
+
+def expand_pair_numbers(pair_str: str):
+    if ',' in pair_str:
+        parts = pair_str.split(',')
+        result = []
+        for p in parts:
+            if '-' in p:
+                start, end = map(int, p.split('-'))
+                result.extend(str(i) for i in range(start, end+1))
+            else:
+                result.append(p.strip())
+        return result
+    elif '-' in pair_str:
+        start, end = map(int, pair_str.split('-'))
+        return [str(i) for i in range(start, end+1)]
+    else:
+        return [pair_str.strip()]
+
+def split_subject_and_teacher(text: str):
+    text = text.strip()
+    if not text or text.lower() == "снято":
+        return text, "—"
+    match = re.search(r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.(?:[А-ЯЁ]\.)?)$', text)
+    if match:
+        teacher = match.group(1)
+        subject = text[:match.start()].strip()
+        if not subject:
+            subject = "—"
+        return subject, teacher
+    else:
+        return text, "—"
+
+def parse_zameny_from_html(html_text: str):
+    soup = BeautifulSoup(html_text, 'lxml')
+    table = soup.find('table')
+    if not table:
+        return []
+    rows = table.find_all('tr')
+    results = []
+    for row in rows:
+        cells = row.find_all('td')
+        if len(cells) < 6:
+            continue
+        group_cell = cells[1].get_text(strip=True)
+        if group_cell != "ИБ1-21":
+            continue
+        pair_numbers_str = cells[2].get_text(strip=True)
+        if not pair_numbers_str:
+            continue
+        replacement_full = cells[4].get_text(strip=True)
+        room = cells[5].get_text(strip=True)
+        pair_list = expand_pair_numbers(pair_numbers_str)
+        if "снято" in replacement_full.lower():
+            for pair_num in pair_list:
+                results.append({
+                    "pair": pair_num,
+                    "type": "remove",
+                })
+            continue
+        is_dist = (replacement_full == "" or replacement_full == "—" or "по расписанию" in replacement_full.lower())
+        if is_dist:
+            for pair_num in pair_list:
+                results.append({
+                    "pair": pair_num,
+                    "type": "dist",
+                    "room": room,
+                })
+        else:
+            replacement_subj, replacement_teacher = split_subject_and_teacher(replacement_full)
+            for pair_num in pair_list:
+                results.append({
+                    "pair": pair_num,
+                    "type": "replace",
+                    "replacement": replacement_subj,
+                    "teacher": replacement_teacher,
+                    "room": room,
+                })
+    return results
+
+def extract_metadata_from_html(html_text: str):
+    soup = BeautifulSoup(html_text, 'lxml')
+    header_text = soup.get_text()
+    date_match = re.search(r'(\d+)\s+([а-я]+)\s+(\d{4})\s+года', header_text)
+    if not date_match:
+        return None, None
+    day = int(date_match.group(1))
+    month_str = date_match.group(2)
+    year = int(date_match.group(3))
+    months = {
+        "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
+        "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12
+    }
+    month = months.get(month_str.lower(), 1)
+    try:
+        file_date = datetime(year, month, day)
+    except:
+        file_date = None
+    type_match = re.search(r'\((Числитель|Знаменатель)\)', header_text)
+    week_type = type_match.group(1) if type_match else None
+    return file_date, week_type
+
+# Базовое расписание (числитель)
 SCHEDULE_NUM_FULL = {
     "понедельник": {
         "1": "Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - Б302",
@@ -49,7 +255,7 @@ SCHEDULE_NUM_FULL = {
     },
 }
 
-# ---------- Базовое расписание (знаменатель) ----------
+# Базовое расписание (знаменатель)
 SCHEDULE_DEN_FULL = {
     "понедельник": {
         "1": "Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - Б302",
@@ -86,127 +292,11 @@ SCHEDULE_DEN_FULL = {
     },
 }
 
-# ---------- Функции ----------
-def format_date_russian(date: datetime) -> str:
-    months = [
-        "января", "февраля", "марта", "апреля", "мая", "июня",
-        "июля", "августа", "сентября", "октября", "ноября", "декабря"
-    ]
-    return f"{date.day} {months[date.month - 1]} {date.year}"
-
-def expand_pair_numbers(pair_str: str):
-    """Преобразует '0', '1,2', '0-2' в список строк"""
-    if ',' in pair_str:
-        parts = pair_str.split(',')
-        result = []
-        for p in parts:
-            if '-' in p:
-                start, end = map(int, p.split('-'))
-                result.extend(str(i) for i in range(start, end+1))
-            else:
-                result.append(p.strip())
-        return result
-    elif '-' in pair_str:
-        start, end = map(int, pair_str.split('-'))
-        return [str(i) for i in range(start, end+1)]
-    else:
-        return [pair_str.strip()]
-
-def split_subject_and_teacher(text: str):
-    """Разделяет строку типа 'Физкультура Колескина И.А.' на предмет и преподавателя"""
-    text = text.strip()
-    if not text or text.lower() == "снято":
-        return text, "—"
-    # Ищем фамилию с инициалами в конце
-    match = re.search(r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.(?:[А-ЯЁ]\.)?)$', text)
-    if match:
-        teacher = match.group(1)
-        subject = text[:match.start()].strip()
-        # Если предмет пуст, ставим "—"
-        if not subject:
-            subject = "—"
-        return subject, teacher
-    else:
-        return text, "—"
-
-def parse_zameny_from_html(html_text: str):
-    soup = BeautifulSoup(html_text, 'lxml')
-    table = soup.find('table')
-    if not table:
-        return []
-    rows = table.find_all('tr')
-    results = []
-    for row in rows:
-        cells = row.find_all('td')
-        if len(cells) < 6:
-            continue
-        group_cell = cells[1].get_text(strip=True)
-        if group_cell != GROUP:
-            continue
-        pair_numbers_str = cells[2].get_text(strip=True)
-        if not pair_numbers_str:
-            continue
-        replacement_full = cells[4].get_text(strip=True)
-        room = cells[5].get_text(strip=True)
-        pair_list = expand_pair_numbers(pair_numbers_str)
-        # Проверяем на "снято"
-        if "снято" in replacement_full.lower():
-            for pair_num in pair_list:
-                results.append({
-                    "pair": pair_num,
-                    "type": "remove",
-                })
-            continue
-        # Проверяем на дистант (по расписанию)
-        is_dist = (replacement_full == "" or replacement_full == "—" or "по расписанию" in replacement_full.lower())
-        if is_dist:
-            for pair_num in pair_list:
-                results.append({
-                    "pair": pair_num,
-                    "type": "dist",
-                    "room": room,
-                })
-        else:
-            # Обычная замена
-            replacement_subj, replacement_teacher = split_subject_and_teacher(replacement_full)
-            for pair_num in pair_list:
-                results.append({
-                    "pair": pair_num,
-                    "type": "replace",
-                    "replacement": replacement_subj,
-                    "teacher": replacement_teacher,
-                    "room": room,
-                })
-    return results
-
-def extract_metadata_from_html(html_text: str):
-    soup = BeautifulSoup(html_text, 'lxml')
-    header_text = soup.get_text()
-    date_match = re.search(r'(\d+)\s+([а-я]+)\s+(\d{4})\s+года', header_text)
-    if not date_match:
-        return None, None
-    day = int(date_match.group(1))
-    month_str = date_match.group(2)
-    year = int(date_match.group(3))
-    months = {
-        "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
-        "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12
-    }
-    month = months.get(month_str.lower(), 1)
-    try:
-        file_date = datetime(year, month, day)
-    except:
-        file_date = None
-    type_match = re.search(r'\((Числитель|Знаменатель)\)', header_text)
-    week_type = type_match.group(1) if type_match else None
-    return file_date, week_type
-
 def build_final_schedule(week_type, target_weekday, replacements):
     if week_type == "Числитель":
         base = SCHEDULE_NUM_FULL.get(target_weekday, {})
     else:
         base = SCHEDULE_DEN_FULL.get(target_weekday, {})
-    # Словарь для замен: key = номер пары, value = (тип, данные)
     repl_dict = {}
     for r in replacements:
         pair = r['pair']
@@ -222,7 +312,6 @@ def build_final_schedule(week_type, target_weekday, replacements):
             else:
                 new_line = "Занятие"
             repl_dict[pair] = ('dist', new_line, r['room'])
-    # Собираем все номера пар из базы и из замен (кроме удалённых)
     all_pair_nums = set(base.keys())
     for pair_num, (typ, *_) in repl_dict.items():
         if typ != 'remove':
@@ -238,7 +327,7 @@ def build_final_schedule(week_type, target_weekday, replacements):
         if pair_num in repl_dict:
             typ = repl_dict[pair_num][0]
             if typ == 'remove':
-                continue  # не добавляем в результат
+                continue
             elif typ == 'replace':
                 _, line, room = repl_dict[pair_num]
                 result.append(f"{pair_emoji}_🔁 → {line}\nКаб: {room}")
@@ -247,7 +336,6 @@ def build_final_schedule(week_type, target_weekday, replacements):
                 result.append(f"{pair_emoji} → {line}\nКаб: {room}")
         else:
             base_line = base[pair_num]
-            # Разделяем на предмет+преподаватель и аудиторию
             match = re.match(r'^(.*?)\s*-\s*(.*?)$', base_line)
             if match:
                 subject_part = match.group(1).strip()
@@ -261,7 +349,7 @@ def build_final_schedule(week_type, target_weekday, replacements):
 async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Загружаю расписание...")
     try:
-        response = requests.get(URL, timeout=15)
+        response = requests.get("https://menu.sttec.yar.ru/timetable/rasp_first.html", timeout=15)
         response.encoding = 'utf-8'
         if response.status_code != 200:
             await update.message.reply_text("Не удалось загрузить страницу с заменами.")
@@ -284,7 +372,7 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         date_str = format_date_russian(file_date)
         message = f"📅 Расписание на {date_str} ({target_weekday}, {week_type})\n\n"
         message += "\n\n".join(final_schedule)
-        message += f"\n\n🔗 <a href='{URL}'>Проверить замены</a>"
+        message += f"\n\n🔗 <a href='https://menu.sttec.yar.ru/timetable/rasp_first.html'>Проверить замены</a>"
         await update.message.reply_text(message, parse_mode='HTML')
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {str(e)}")
@@ -301,18 +389,36 @@ async def ib_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• <code>0️⃣ →</code> — обычная пара без изменений\n"
         "• <b>Каб:</b> — аудитория (или ДОТ, Сп.зал и т.д.)\n\n"
         "📎 Внизу каждого сообщения есть ссылка «Проверить замены» — на всякий случай, если не уверены в правильности отображения информации\n\n"
+        "📚 <b>Домашние задания:</b>\n"
+        "• /hw — показать список заданий\n"
+        "• /addhw <текст> — добавить задание (только админ)\n"
+        "• /rmhw <номер> — удалить задание (только админ)\n\n"
         "Успехов в учёбе! 📚",
         parse_mode='HTML'
     )
 
+# ---------- ОСНОВНАЯ ФУНКЦИЯ MAIN (объединяет всё) ----------
 async def main():
-    import logging
     logging.basicConfig(level=logging.INFO)
+    
+    # Инициализация БД для домашки
+    init_db()
+    
     application = Application.builder().token(TOKEN).updater(None).build()
+    
+    # Регистрируем старые команды (замены)
     application.add_handler(CommandHandler("zam", get_schedule))
     application.add_handler(CommandHandler("ib", ib_command))
     application.add_handler(CommandHandler("start", ib_command))
+    
+    # Регистрируем новые команды (домашка)
+    application.add_handler(CommandHandler("addhw", add_hw))
+    application.add_handler(CommandHandler("rmhw", rm_hw))
+    application.add_handler(CommandHandler("hw", show_hw))
+    application.add_handler(CommandHandler("myid", my_id))  # временная, чтобы узнать свой ID
+    
     await application.initialize()
+    
     render_url = os.environ.get("RENDER_EXTERNAL_URL")
     if render_url:
         await application.bot.set_webhook(f"{render_url}/telegram")
@@ -320,22 +426,24 @@ async def main():
     else:
         logging.error("RENDER_EXTERNAL_URL not set.")
         return
-    from starlette.applications import Starlette
-    from starlette.routing import Route
-    from starlette.requests import Request
-    from starlette.responses import Response, PlainTextResponse
+    
+    # Starlette вебхук
     async def telegram_webhook(request: Request) -> Response:
         await application.update_queue.put(Update.de_json(await request.json(), application.bot))
         return Response()
+    
     async def health_check(request: Request) -> PlainTextResponse:
         return PlainTextResponse("OK")
+    
     starlette_app = Starlette(routes=[
         Route("/telegram", telegram_webhook, methods=["POST"]),
         Route("/healthcheck", health_check, methods=["GET"]),
     ])
+    
     port = int(os.environ.get("PORT", 8000))
     config = uvicorn.Config(starlette_app, host="0.0.0.0", port=port, log_level="info")
     server = uvicorn.Server(config)
+    
     async with application:
         await application.start()
         await server.serve()
