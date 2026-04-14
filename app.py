@@ -15,8 +15,8 @@ import requests
 from bs4 import BeautifulSoup
 
 # ---------- КОНФИГУРАЦИЯ ----------
-TOKEN = "8612501783:AAGeBjR2_LP5DtfTPwzgg55nIjACKrH6hA0"  # твой токен, не трогай
-ADMIN_USER_ID = 1207797393  # ПОСЛЕ /myid ВСТАВЬ СЮДА СВОЙ ID (число)
+TOKEN = os.environ.get("BOT_TOKEN")
+ADMIN_USER_ID = int(os.environ.get("ADMIN_USER_ID", 0))  # ПОСЛЕ /myid ВСТАВЬ СЮДА СВОЙ ID (число)
 
 # ---------- БАЗА ДАННЫХ ДЛЯ ДОМАШКИ (SQLite) ----------
 DB_PATH = "homework.db"
