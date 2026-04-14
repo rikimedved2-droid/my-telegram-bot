@@ -23,11 +23,13 @@ ADMIN_IDS = []
 admin_ids_str = os.environ.get("ADMIN_IDS", "")
 if admin_ids_str:
     ADMIN_IDS = [int(x.strip()) for x in admin_ids_str.split(",") if x.strip()]
+else:
+    logging.warning("ADMIN_IDS not set. No one will be able to add/delete homework.")
 
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
-# ---------- БАЗА ДАННЫХ ДЛЯ ДОМАШКИ ----------
+# ---------- БАЗА ДАННЫХ ДЛЯ ДОМАШКИ (SQLite, данные не сохраняются при передеплое) ----------
 DB_PATH = "homework.db"
 
 def init_db():
@@ -147,7 +149,6 @@ async def cancel_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ---------- ОБРАБОТЧИКИ КОМАНД ДОМАШКИ ----------
-# Для подтверждения удаления используем простой словарь
 pending_deletions = {}
 
 async def del_hw(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -164,12 +165,14 @@ async def del_hw(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Неверный номер.")
         return
     real_id, task_text, due_date, _ = tasks[temp_num - 1]
-    # Сохраняем информацию о задании для подтверждения
     pending_deletions[user_id] = (real_id, task_text, temp_num)
     await update.message.reply_text(f"⚠️ Точно удалить задание №{temp_num}?\n{task_text}\nОтправь /confirm_del или /cancel_del")
 
 async def confirm_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Нет прав.")
+        return
     if user_id not in pending_deletions:
         await update.message.reply_text("Нет заданий на подтверждение.")
         return
@@ -181,6 +184,9 @@ async def confirm_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cancel_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Нет прав.")
+        return
     if user_id in pending_deletions:
         del pending_deletions[user_id]
         await update.message.reply_text("✅ Удаление отменено.")
@@ -207,7 +213,7 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🆔 Ваш ID: `{update.effective_user.id}`", parse_mode='Markdown')
 
-# ---------- ФУНКЦИИ ДЛЯ РАСПИСАНИЯ И ЗАМЕН (старые, без изменений) ----------
+# ---------- ФУНКЦИИ ДЛЯ РАСПИСАНИЯ И ЗАМЕН (без изменений) ----------
 def format_date_russian(date: datetime) -> str:
     months = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"]
     return f"{date.day} {months[date.month-1]} {date.year}"
@@ -395,7 +401,6 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {str(e)}")
 
-# ОРИГИНАЛЬНАЯ СПРАВКА (полная, как было)
 async def ib_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🤖 <b>Бот замен для группы ИБ1-21</b>\n\n"
@@ -420,12 +425,10 @@ async def main():
     init_db()
     application = Application.builder().token(TOKEN).updater(None).build()
 
-    # Старые команды
     application.add_handler(CommandHandler("zam", get_schedule))
     application.add_handler(CommandHandler("ib", ib_command))
     application.add_handler(CommandHandler("start", ib_command))
 
-    # Команды домашки
     application.add_handler(CommandHandler("hw", show_hw))
     application.add_handler(CommandHandler("del", del_hw))
     application.add_handler(CommandHandler("confirm_del", confirm_del))
@@ -433,7 +436,6 @@ async def main():
     application.add_handler(CommandHandler("admin", admin_help))
     application.add_handler(CommandHandler("myid", my_id))
 
-    # Диалог добавления
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("add", add_start)],
         states={
