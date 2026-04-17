@@ -95,7 +95,6 @@ def format_date_russian(date: datetime) -> str:
     return f"{date.day} {months[date.month - 1]} {date.year}"
 
 def expand_pair_numbers(pair_str: str):
-    """Преобразует '0', '1,2', '0-2' в список строк"""
     if ',' in pair_str:
         parts = pair_str.split(',')
         result = []
@@ -111,23 +110,6 @@ def expand_pair_numbers(pair_str: str):
         return [str(i) for i in range(start, end+1)]
     else:
         return [pair_str.strip()]
-
-def split_subject_and_teacher(text: str):
-    """Разделяет строку типа 'Физкультура Колескина И.А.' на предмет и преподавателя"""
-    text = text.strip()
-    if not text or text.lower() == "снято":
-        return text, "—"
-    # Ищем фамилию с инициалами в конце
-    match = re.search(r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.(?:[А-ЯЁ]\.)?)$', text)
-    if match:
-        teacher = match.group(1)
-        subject = text[:match.start()].strip()
-        # Если предмет пуст, ставим "—"
-        if not subject:
-            subject = "—"
-        return subject, teacher
-    else:
-        return text, "—"
 
 def parse_zameny_from_html(html_text: str):
     soup = BeautifulSoup(html_text, 'lxml')
@@ -149,34 +131,29 @@ def parse_zameny_from_html(html_text: str):
         replacement_full = cells[4].get_text(strip=True)
         room = cells[5].get_text(strip=True)
         pair_list = expand_pair_numbers(pair_numbers_str)
-        # Проверяем на "снято"
-        if "снято" in replacement_full.lower():
-            for pair_num in pair_list:
-                results.append({
-                    "pair": pair_num,
-                    "type": "remove",
-                })
+        
+        # Дистант: если в поле замены "по расписанию" (или пусто, или "—")
+        # и при этом есть аудитория (не пустая)
+        if replacement_full == "" or replacement_full == "—" or "по расписанию" in replacement_full.lower():
+            # Если есть аудитория и она не пустая (и не "?") – применяем дистант
+            if room and room.strip() and room != "?":
+                for pair_num in pair_list:
+                    results.append({
+                        "pair": pair_num,
+                        "type": "dist",
+                        "room": room,
+                    })
+            # Если аудитории нет – просто пропускаем (нет изменений)
             continue
-        # Проверяем на дистант (по расписанию)
-        is_dist = (replacement_full == "" or replacement_full == "—" or "по расписанию" in replacement_full.lower())
-        if is_dist:
-            for pair_num in pair_list:
-                results.append({
-                    "pair": pair_num,
-                    "type": "dist",
-                    "room": room,
-                })
-        else:
-            # Обычная замена
-            replacement_subj, replacement_teacher = split_subject_and_teacher(replacement_full)
-            for pair_num in pair_list:
-                results.append({
-                    "pair": pair_num,
-                    "type": "replace",
-                    "replacement": replacement_subj,
-                    "teacher": replacement_teacher,
-                    "room": room,
-                })
+        
+        # Всё остальное считаем заменой
+        for pair_num in pair_list:
+            results.append({
+                "pair": pair_num,
+                "type": "replace",
+                "replacement": replacement_full,
+                "room": room,
+            })
     return results
 
 def extract_metadata_from_html(html_text: str):
@@ -206,28 +183,25 @@ def build_final_schedule(week_type, target_weekday, replacements):
         base = SCHEDULE_NUM_FULL.get(target_weekday, {})
     else:
         base = SCHEDULE_DEN_FULL.get(target_weekday, {})
-    # Словарь для замен: key = номер пары, value = (тип, данные)
     repl_dict = {}
     for r in replacements:
         pair = r['pair']
-        if r['type'] == 'remove':
-            repl_dict[pair] = ('remove', None)
-        elif r['type'] == 'replace':
-            repl_dict[pair] = ('replace', f"{r['replacement']} ({r['teacher']})", r['room'])
+        if r['type'] == 'replace':
+            repl_dict[pair] = ('replace', r['replacement'], r['room'])
         elif r['type'] == 'dist':
+            # Дистант: оставляем исходный предмет, меняем аудиторию
             if pair in base:
                 original_line = base[pair]
+                # Убираем старую аудиторию
                 base_part = re.sub(r'\s*\-.*$', '', original_line)
-                new_line = base_part
+                repl_dict[pair] = ('dist', base_part, r['room'])
             else:
-                new_line = "Занятие"
-            repl_dict[pair] = ('dist', new_line, r['room'])
-    # Собираем все номера пар из базы и из замен (кроме удалённых)
+                # Если пары нет в базе – создаём заглушку
+                repl_dict[pair] = ('dist', "Занятие", r['room'])
     all_pair_nums = set(base.keys())
-    for pair_num, (typ, *_) in repl_dict.items():
-        if typ != 'remove':
-            all_pair_nums.add(pair_num)
-    number_emojis = ["0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"]
+    for pair_num in repl_dict.keys():
+        all_pair_nums.add(pair_num)
+    number_emojis = ["0️⃣","1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣"]
     result = []
     for pair_num in sorted(all_pair_nums, key=int):
         num = int(pair_num)
@@ -236,18 +210,13 @@ def build_final_schedule(week_type, target_weekday, replacements):
         else:
             pair_emoji = f"{num}️⃣"
         if pair_num in repl_dict:
-            typ = repl_dict[pair_num][0]
-            if typ == 'remove':
-                continue  # не добавляем в результат
-            elif typ == 'replace':
-                _, line, room = repl_dict[pair_num]
-                result.append(f"{pair_emoji}_🔁 → {line}\nКаб: {room}")
+            typ, text, room = repl_dict[pair_num]
+            if typ == 'replace':
+                result.append(f"{pair_emoji}_🔁 → {text}\nКаб: {room}")
             elif typ == 'dist':
-                _, line, room = repl_dict[pair_num]
-                result.append(f"{pair_emoji} → {line}\nКаб: {room}")
+                result.append(f"{pair_emoji} → {text}\nКаб: {room} <i>[ДОТ]</i>")
         else:
             base_line = base[pair_num]
-            # Разделяем на предмет+преподаватель и аудиторию
             match = re.match(r'^(.*?)\s*-\s*(.*?)$', base_line)
             if match:
                 subject_part = match.group(1).strip()
@@ -298,8 +267,9 @@ async def ib_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Автоматически подставляет замены в расписание\n\n"
         "🔍 <b>Информация по обозначениям:</b>\n"
         "• <code>0️⃣_🔁</code> — пара с заменой\n"
-        "• <code>0️⃣ →</code> — обычная пара без изменений\n"
-        "• <b>Каб:</b> — аудитория (или ДОТ, Сп.зал и т.д.)\n\n"
+        "• <code>0️⃣ →</code> — обычная пара\n"
+        "• <code>0️⃣ → ... [ДОТ]</code> — дистант (пары по расписанию, но аудитория ДОТ)\n"
+        "• <b>Каб:</b> — аудитория\n\n"
         "📎 Внизу каждого сообщения есть ссылка «Проверить замены» — на всякий случай, если не уверены в правильности отображения информации\n\n"
         "Успехов в учёбе! 📚",
         parse_mode='HTML'
