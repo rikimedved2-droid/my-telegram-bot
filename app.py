@@ -132,10 +132,10 @@ def parse_zameny_from_html(html_text: str):
         room = cells[5].get_text(strip=True)
         pair_list = expand_pair_numbers(pair_numbers_str)
         
-        # Дистант: если в поле замены "по расписанию" (или пусто, или "—")
-        # и при этом есть аудитория (не пустая)
-        if replacement_full == "" or replacement_full == "—" or "по расписанию" in replacement_full.lower():
-            # Если есть аудитория и она не пустая (и не "?") – применяем дистант
+        # Проверяем, является ли строка чисто "по расписанию" (или пусто, или "—")
+        stripped = replacement_full.strip().lower()
+        if stripped == "" or stripped == "—" or stripped == "по расписанию":
+            # Дистант, если есть аудитория
             if room and room.strip() and room != "?":
                 for pair_num in pair_list:
                     results.append({
@@ -143,7 +143,7 @@ def parse_zameny_from_html(html_text: str):
                         "type": "dist",
                         "room": room,
                     })
-            # Если аудитории нет – просто пропускаем (нет изменений)
+            # Если аудитории нет – просто пропускаем
             continue
         
         # Всё остальное считаем заменой
@@ -189,14 +189,11 @@ def build_final_schedule(week_type, target_weekday, replacements):
         if r['type'] == 'replace':
             repl_dict[pair] = ('replace', r['replacement'], r['room'])
         elif r['type'] == 'dist':
-            # Дистант: оставляем исходный предмет, меняем аудиторию
             if pair in base:
                 original_line = base[pair]
-                # Убираем старую аудиторию
                 base_part = re.sub(r'\s*\-.*$', '', original_line)
                 repl_dict[pair] = ('dist', base_part, r['room'])
             else:
-                # Если пары нет в базе – создаём заглушку
                 repl_dict[pair] = ('dist', "Занятие", r['room'])
     all_pair_nums = set(base.keys())
     for pair_num in repl_dict.keys():
