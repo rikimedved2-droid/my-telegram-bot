@@ -1,6 +1,5 @@
 python-telegram-bot==21.*
-uvicorn==0.30.*
-starlette==0.37.*
 requests==2.33.1
 beautifulsoup4==4.12.*
 lxml==5.1.*
+supabase==2.6.0
