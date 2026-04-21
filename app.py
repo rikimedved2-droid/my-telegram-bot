@@ -1,5 +1,6 @@
 import os
 import re
+import asyncio
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
@@ -59,7 +60,7 @@ def delete_task_db(task_id: int) -> bool:
     res = supabase.table("homework").delete().eq("id", task_id).execute()
     return len(res.data) > 0
 
-# ---------- ФУНКЦИИ КЛАВИАТУР И ОБРАБОТЧИКИ (без изменений) ----------
+# ---------- ФУНКЦИИ КЛАВИАТУР И ОБРАБОТЧИКИ ----------
 def format_hw_list(tasks):
     if not tasks:
         return "📭 Нет текущих домашних заданий."
@@ -643,7 +644,7 @@ def build_final_schedule(week_type, target_weekday, replacements):
     return result
 
 # ---------- MAIN ----------
-def main():
+async def main_async():
     application = Application.builder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
@@ -653,7 +654,9 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     print("Бот запущен с Supabase. Данные сохраняются в облаке.")
-    application.run_polling()
+    await application.run_polling()
 
 if __name__ == "__main__":
-    main()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(main_async())
