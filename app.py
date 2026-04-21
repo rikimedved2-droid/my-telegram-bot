@@ -61,7 +61,7 @@ def delete_task_db(task_id: int) -> bool:
     res = supabase.table("homework").delete().eq("id", task_id).execute()
     return len(res.data) > 0
 
-# ---------- КЛАВИАТУРЫ ----------
+# ---------- ФУНКЦИИ КЛАВИАТУР ----------
 def format_hw_list(tasks):
     if not tasks:
         return "📭 Нет текущих домашних заданий."
@@ -130,7 +130,7 @@ def get_cancel_button(callback_data="cancel_action"):
 def get_menu_button():
     return ReplyKeyboardMarkup([[KeyboardButton("📋 Меню")]], resize_keyboard=True)
 
-# ---------- ДИАЛОГИ ----------
+# ---------- ОБРАБОТЧИКИ ----------
 async def add_hw_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -211,7 +211,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("👑 Админ-панель", reply_markup=get_admin_keyboard())
         return
 
-# ---------- ОТОБРАЖЕНИЕ ЗАМЕН ----------
 async def send_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -247,7 +246,6 @@ async def send_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"Ошибка: {str(e)}")
         await query.message.reply_text("Главное меню:", reply_markup=get_main_keyboard(is_admin(user_id)))
 
-# ---------- ОТОБРАЖЕНИЕ ДОМАШКИ ----------
 async def show_hw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -255,7 +253,6 @@ async def show_hw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = format_hw_list(tasks)
     await query.edit_message_text(text, reply_markup=get_back_to_main_button())
 
-# ---------- ИНФО ----------
 async def show_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -277,7 +274,6 @@ async def show_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await query.edit_message_text(text, reply_markup=get_back_to_main_button(), parse_mode='HTML')
 
-# ---------- УДАЛЕНИЕ ДЗ ----------
 async def delete_task_by_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -314,7 +310,6 @@ async def confirm_delete_task(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text("❌ Ошибка удаления.", reply_markup=get_admin_keyboard())
     context.user_data.pop('pending_delete_task', None)
 
-# ---------- УПРАВЛЕНИЕ АДМИНАМИ ----------
 async def add_admin_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -389,14 +384,12 @@ async def confirm_delete_admin(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.edit_message_text("❌ Ошибка при удалении.", reply_markup=get_admin_keyboard())
     context.user_data.pop('pending_delete_admin', None)
 
-# ---------- ОТМЕНА ДИАЛОГОВ ----------
 async def cancel_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data.clear()
     await query.edit_message_text("👑 Админ-панель", reply_markup=get_admin_keyboard())
 
-# ---------- КОМАНДЫ ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     await update.message.reply_text(
@@ -408,7 +401,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🆔 Ваш ID: `{update.effective_user.id}`", parse_mode='Markdown')
 
-# ---------- ОСНОВНОЙ ОБРАБОТЧИК КНОПОК ----------
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -644,21 +636,20 @@ def build_final_schedule(week_type, target_weekday, replacements):
                 result.append(f"{pair_emoji} → {subject_part}")
     return result
 
-# ---------- HEALTH CHECK СЕРВЕР (чтобы Render не ругался) ----------
+# ---------- HEALTH CHECK СЕРВЕР ----------
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"OK")
     def log_message(self, format, *args):
-        pass  # отключаем логи healthcheck
+        pass
 
 def run_health_server():
     port = int(os.environ.get("PORT", 8000))
     server = HTTPServer(("0.0.0.0", port), HealthHandler)
     server.serve_forever()
 
-# Запускаем health-сервер в фоне
 threading.Thread(target=run_health_server, daemon=True).start()
 
 # ---------- MAIN ----------
