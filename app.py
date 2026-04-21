@@ -611,4 +611,49 @@ def build_final_schedule(week_type, target_weekday, replacements):
             pair_emoji = number_emojis[num]
         else:
             pair_emoji = f"{num}️⃣"
-        if pair_num in
+        if pair_num in repl_dict:
+            typ = repl_dict[pair_num][0]
+            if typ == 'remove':
+                continue
+            elif typ == 'replace':
+                _, text, room = repl_dict[pair_num]
+                if room and room != "?":
+                    result.append(f"{pair_emoji}_🔁 → {text}\nКаб: {room}")
+                else:
+                    result.append(f"{pair_emoji}_🔁 → {text}")
+            elif typ == 'dist':
+                _, line, room = repl_dict[pair_num]
+                if room and room != "?":
+                    result.append(f"{pair_emoji} → {line}\nКаб: {room}")
+                else:
+                    result.append(f"{pair_emoji} → {line}")
+        else:
+            base_line = base[pair_num]
+            match = re.match(r'^(.*?)\s*-\s*(.*?)$', base_line)
+            if match:
+                subject_part = match.group(1).strip()
+                room = match.group(2).strip()
+            else:
+                subject_part = base_line
+                room = "?"
+            if room and room != "?":
+                result.append(f"{pair_emoji} → {subject_part}\nКаб: {room}")
+            else:
+                result.append(f"{pair_emoji} → {subject_part}")
+    return result
+
+# ---------- MAIN (синхронный, без ручного asyncio) ----------
+def main():
+    application = Application.builder().token(TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("myid", my_id))
+
+    application.add_handler(CallbackQueryHandler(button_callback))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+    print("Бот запущен с Supabase. Данные сохраняются в облаке.")
+    application.run_polling()
+
+if __name__ == "__main__":
+    main()
