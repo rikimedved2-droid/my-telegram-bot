@@ -619,4 +619,60 @@ def build_final_schedule(week_type, target_weekday, replacements):
                 continue
             elif typ == 'replace':
                 _, text, room = repl_dict[pair_num]
-                if room
+                if room and room != "?":
+                    result.append(f"{pair_emoji}_🔁 → {text}\nКаб: {room}")
+                else:
+                    result.append(f"{pair_emoji}_🔁 → {text}")
+            elif typ == 'dist':
+                _, line, room = repl_dict[pair_num]
+                if room and room != "?":
+                    result.append(f"{pair_emoji} → {line}\nКаб: {room}")
+                else:
+                    result.append(f"{pair_emoji} → {line}")
+        else:
+            base_line = base[pair_num]
+            match = re.match(r'^(.*?)\s*-\s*(.*?)$', base_line)
+            if match:
+                subject_part = match.group(1).strip()
+                room = match.group(2).strip()
+            else:
+                subject_part = base_line
+                room = "?"
+            if room and room != "?":
+                result.append(f"{pair_emoji} → {subject_part}\nКаб: {room}")
+            else:
+                result.append(f"{pair_emoji} → {subject_part}")
+    return result
+
+# ---------- HEALTH CHECK СЕРВЕР (чтобы Render не ругался) ----------
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+    def log_message(self, format, *args):
+        pass  # отключаем логи healthcheck
+
+def run_health_server():
+    port = int(os.environ.get("PORT", 8000))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    server.serve_forever()
+
+# Запускаем health-сервер в фоне
+threading.Thread(target=run_health_server, daemon=True).start()
+
+# ---------- MAIN ----------
+def main():
+    application = Application.builder().token(TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("myid", my_id))
+
+    application.add_handler(CallbackQueryHandler(button_callback))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+    print("Бот запущен с Supabase. Health-сервер работает на порту", os.environ.get("PORT", 8000))
+    application.run_polling()
+
+if __name__ == "__main__":
+    main()
