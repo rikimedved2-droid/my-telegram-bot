@@ -22,7 +22,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ---------- ФУНКЦИИ БАЗЫ ДАННЫХ ----------
+# ---------- ФУНКЦИИ БАЗЫ ДАННЫХ (Supabase) ----------
 def is_admin(user_id: int) -> bool:
     res = supabase.table("admins").select("user_id").eq("user_id", user_id).execute()
     return len(res.data) > 0
@@ -59,7 +59,7 @@ def delete_task_db(task_id: int) -> bool:
     res = supabase.table("homework").delete().eq("id", task_id).execute()
     return len(res.data) > 0
 
-# ---------- КЛАВИАТУРЫ ----------
+# ---------- ФУНКЦИИ КЛАВИАТУР И ОБРАБОТЧИКИ ----------
 def format_hw_list(tasks):
     if not tasks:
         return "📭 Нет текущих домашних заданий."
@@ -476,7 +476,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("cancel_del_task") or data.startswith("cancel_del_admin"):
         await query.edit_message_text("👑 Админ-панель", reply_markup=get_admin_keyboard())
 
-# ---------- ПАРСИНГ ЗАМЕН ----------
+# ---------- ФУНКЦИИ ДЛЯ ЗАМЕН ----------
 def format_date_russian(date):
     months = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"]
     return f"{date.day} {months[date.month-1]} {date.year}"
@@ -573,7 +573,7 @@ SCHEDULE_NUM_FULL = {
 }
 SCHEDULE_DEN_FULL = {
     "понедельник": {"1": "Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - Б302","2": "МДК.04.01 (Тимощук М.В., Егорова Ю.С.) - Б309","3": "Электроника и схемотехника (Леонидова Н.А.) - М202"},
-    "вторник": {"0": "МДК 04 Учебная практика (Хожайнова М.Г., Тимощук М.В.) - Б308/Б309","1": "УП.04.02 (Хожайнова М.Г., Тимощук М.В.) - Б308/Б309","2": "МДК.01.01 Операционные системы и среды (Егорова Ю.С., Андреева Е.И.) - Б407","3": "Дополнительная профессия п/гр 1 (Панасюк А.Д.) - Б304"},
+    "вторник": {"0": "МДК 04 Учебная практика (Хожайнова М.Г., Тимощук М.В.) - Б308/Б309","1": "УП.04.02 (Хожайnova М.Г., Тимощук М.В.) - Б308/Б309","2": "МДК.01.01 Операционные системы и среды (Егорова Ю.С., Андреева Е.И.) - Б407","3": "Дополнительная профессия п/гр 1 (Панасюк А.Д.) - Б304"},
     "среда": {"0": "МДК.01.02 Базы данных (Байдина Ю.А.) - Б302","1": "Технологии физического уровня передачи данных (Груздев В.В., Серова А.М.) - Б304, Б204","2": "Технологии физического уровня передачи данных (Груздев В.В.) - Б501"},
     "четверг": {"0": "МДК.04.02 (Тимощук М.В.) - ДОТ","1": "МДК.04 Учебная практика (Тимощук М.В.) - ДОТ","2": "Основы алгоритмизации и программирования (Вершинина Н.А., Панасюк А.Д.) - ДОТ","3": "Математика (Холманова В.М.) - ДОТ"},
     "пятница": {"0": "Электроника и схемотехника п/гр.2 (Леонидова Н.А.) - Б509","1": "Электроника и схемотехника п/гр.2 (Леонидова Н.А.) - Б509","2": "МДК 01.01 Операционные системы и среды (Егорова Ю.С.) - А401","3": "Организационно-правовое обеспечение информационной безопасности (Воробьева Н.Е.) - Б502"},
@@ -611,49 +611,4 @@ def build_final_schedule(week_type, target_weekday, replacements):
             pair_emoji = number_emojis[num]
         else:
             pair_emoji = f"{num}️⃣"
-        if pair_num in repl_dict:
-            typ = repl_dict[pair_num][0]
-            if typ == 'remove':
-                continue
-            elif typ == 'replace':
-                _, text, room = repl_dict[pair_num]
-                if room and room != "?":
-                    result.append(f"{pair_emoji}_🔁 → {text}\nКаб: {room}")
-                else:
-                    result.append(f"{pair_emoji}_🔁 → {text}")
-            elif typ == 'dist':
-                _, line, room = repl_dict[pair_num]
-                if room and room != "?":
-                    result.append(f"{pair_emoji} → {line}\nКаб: {room}")
-                else:
-                    result.append(f"{pair_emoji} → {line}")
-        else:
-            base_line = base[pair_num]
-            match = re.match(r'^(.*?)\s*-\s*(.*?)$', base_line)
-            if match:
-                subject_part = match.group(1).strip()
-                room = match.group(2).strip()
-            else:
-                subject_part = base_line
-                room = "?"
-            if room and room != "?":
-                result.append(f"{pair_emoji} → {subject_part}\nКаб: {room}")
-            else:
-                result.append(f"{pair_emoji} → {subject_part}")
-    return result
-
-# ---------- MAIN (синхронный, без ручного asyncio) ----------
-def main():
-    application = Application.builder().token(TOKEN).build()
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("myid", my_id))
-
-    application.add_handler(CallbackQueryHandler(button_callback))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
-    print("Бот запущен с Supabase. Данные сохраняются в облаке.")
-    application.run_polling()
-
-if __name__ == "__main__":
-    main()
+        if pair_num in
