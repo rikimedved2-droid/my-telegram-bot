@@ -1,6 +1,5 @@
 import os
 import re
-import asyncio
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
@@ -15,7 +14,7 @@ if not TOKEN:
 
 INITIAL_ADMIN_ID = 1207797393
 
-# ---------- НАСТРОЙКИ SUPABASE (из переменных окружения) ----------
+# ---------- НАСТРОЙКИ SUPABASE ----------
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 if not SUPABASE_URL or not SUPABASE_KEY:
@@ -23,7 +22,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ---------- ФУНКЦИИ ДЛЯ БАЗЫ ДАННЫХ (Supabase) ----------
+# ---------- ФУНКЦИИ БАЗЫ ДАННЫХ ----------
 def is_admin(user_id: int) -> bool:
     res = supabase.table("admins").select("user_id").eq("user_id", user_id).execute()
     return len(res.data) > 0
@@ -60,7 +59,7 @@ def delete_task_db(task_id: int) -> bool:
     res = supabase.table("homework").delete().eq("id", task_id).execute()
     return len(res.data) > 0
 
-# ---------- ФУНКЦИИ КЛАВИАТУР И ОБРАБОТЧИКИ ----------
+# ---------- КЛАВИАТУРЫ ----------
 def format_hw_list(tasks):
     if not tasks:
         return "📭 Нет текущих домашних заданий."
@@ -477,7 +476,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("cancel_del_task") or data.startswith("cancel_del_admin"):
         await query.edit_message_text("👑 Админ-панель", reply_markup=get_admin_keyboard())
 
-# ---------- ФУНКЦИИ ДЛЯ ЗАМЕН ----------
+# ---------- ПАРСИНГ ЗАМЕН ----------
 def format_date_russian(date):
     months = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"]
     return f"{date.day} {months[date.month-1]} {date.year}"
@@ -643,8 +642,8 @@ def build_final_schedule(week_type, target_weekday, replacements):
                 result.append(f"{pair_emoji} → {subject_part}")
     return result
 
-# ---------- MAIN ----------
-async def main_async():
+# ---------- MAIN (синхронный, без ручного asyncio) ----------
+def main():
     application = Application.builder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
@@ -654,9 +653,7 @@ async def main_async():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     print("Бот запущен с Supabase. Данные сохраняются в облаке.")
-    await application.run_polling()
+    application.run_polling()
 
 if __name__ == "__main__":
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(main_async())
+    main()
