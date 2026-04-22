@@ -1,5 +1,6 @@
 import os
 import re
+import asyncio
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timedelta
@@ -61,7 +62,7 @@ def delete_task_db(task_id: int) -> bool:
     res = supabase.table("homework").delete().eq("id", task_id).execute()
     return len(res.data) > 0
 
-# ---------- ФУНКЦИИ КЛАВИАТУР ----------
+# ---------- КЛАВИАТУРЫ ----------
 def format_hw_list(tasks):
     if not tasks:
         return "📭 Нет текущих домашних заданий."
@@ -396,7 +397,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🤖 Бот замен и домашних заданий для группы ИБ1-21\n\nГлавное меню:",
         reply_markup=get_main_keyboard(is_admin(user_id))
     )
-    await update.message.reply_text("\u200b", reply_markup=get_menu_button())
+    # Убираем пустое сообщение, просто показываем меню
+    await update.message.reply_text("Меню:", reply_markup=get_menu_button())
 
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🆔 Ваш ID: `{update.effective_user.id}`", parse_mode='Markdown')
@@ -444,7 +446,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("⛔ Нет прав.", show_alert=True)
     elif data == "main_menu":
         await query.edit_message_text("Главное меню:", reply_markup=get_main_keyboard(is_admin(user_id)))
-        await query.message.reply_text("\u200b", reply_markup=get_menu_button())
+        await query.message.reply_text("Меню:", reply_markup=get_menu_button())
     elif data == "cancel_add_hw" or data == "cancel_add_admin" or data == "cancel_action":
         await cancel_action(update, context)
     elif data.startswith("del_"):
@@ -650,10 +652,17 @@ def run_health_server():
     server = HTTPServer(("0.0.0.0", port), HealthHandler)
     server.serve_forever()
 
+# Запускаем health-сервер в фоне
 threading.Thread(target=run_health_server, daemon=True).start()
 
 # ---------- MAIN ----------
 def main():
+    # Для Python 3.14+ создаём цикл событий, если его нет
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
     application = Application.builder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
