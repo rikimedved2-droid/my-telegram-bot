@@ -4,7 +4,7 @@ import asyncio
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timedelta
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
 import requests
 from bs4 import BeautifulSoup
@@ -128,9 +128,6 @@ def get_back_to_main_button():
 def get_cancel_button(callback_data="cancel_action"):
     return InlineKeyboardMarkup([[InlineKeyboardButton("❌ Отмена", callback_data=callback_data)]])
 
-def get_menu_button():
-    return ReplyKeyboardMarkup([[KeyboardButton("📋 Меню")]], resize_keyboard=True)
-
 # ---------- ОБРАБОТЧИКИ ----------
 async def add_hw_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -149,10 +146,6 @@ async def add_hw_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
-
-    if text == "📋 Меню":
-        await start(update, context)
-        return
 
     if context.user_data.get('waiting_for_admin_id'):
         if not text.isdigit():
@@ -397,8 +390,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🤖 Бот замен и домашних заданий для группы ИБ1-21\n\nГлавное меню:",
         reply_markup=get_main_keyboard(is_admin(user_id))
     )
-    # Убираем пустое сообщение, просто показываем меню
-    await update.message.reply_text("Меню:", reply_markup=get_menu_button())
 
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🆔 Ваш ID: `{update.effective_user.id}`", parse_mode='Markdown')
@@ -446,7 +437,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("⛔ Нет прав.", show_alert=True)
     elif data == "main_menu":
         await query.edit_message_text("Главное меню:", reply_markup=get_main_keyboard(is_admin(user_id)))
-        await query.message.reply_text("Меню:", reply_markup=get_menu_button())
     elif data == "cancel_add_hw" or data == "cancel_add_admin" or data == "cancel_action":
         await cancel_action(update, context)
     elif data.startswith("del_"):
@@ -636,9 +626,7 @@ def build_final_schedule(week_type, target_weekday, replacements):
                 result.append(f"{pair_emoji} → {subject_part}\nКаб: {room}")
             else:
                 result.append(f"{pair_emoji} → {subject_part}")
-    return result
-
-# ---------- HEALTH CHECK СЕРВЕР ----------
+    return result# ---------- HEALTH CHECK СЕРВЕР ----------
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -652,12 +640,10 @@ def run_health_server():
     server = HTTPServer(("0.0.0.0", port), HealthHandler)
     server.serve_forever()
 
-# Запускаем health-сервер в фоне
 threading.Thread(target=run_health_server, daemon=True).start()
 
 # ---------- MAIN ----------
 def main():
-    # Для Python 3.14+ создаём цикл событий, если его нет
     try:
         asyncio.get_event_loop()
     except RuntimeError:
@@ -671,7 +657,7 @@ def main():
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    print("Бот запущен с Supabase. Health-сервер работает на порту", os.environ.get("PORT", 8000))
+    print("Бот запущен")
     application.run_polling()
 
 if __name__ == "__main__":
